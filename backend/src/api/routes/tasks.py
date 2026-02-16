@@ -547,6 +547,16 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
     # Check if custom SRT content is provided
     srt_content = transcription_options.get("srt_content")
     if srt_content and isinstance(srt_content, str) and srt_content.strip():
+        # Add srt_content to runtime options but keep original transcription_provider
+        transcription_provider = 'srt_local'
+        transcription_options = {
+            **transcription_options,
+            "srt_content": srt_content,
+            "srt_upload": True,  # Flag to indicate SRT upload mode
+        }
+    # Check if custom SRT content is provided
+    srt_content = transcription_options.get("srt_content")
+    if srt_content and isinstance(srt_content, str) and srt_content.strip():
         # Use SRT provider when SRT content is provided
         transcription_provider = "srt"
         transcription_options = {
@@ -1006,20 +1016,46 @@ async def get_task_source_video(task_id: str, request: Request, db: AsyncSession
         task = await task_service.task_repo.get_task_by_id(db, task_id)
 
         if not task:
+            logger.error(f"Task {task_id} not found")
             raise HTTPException(status_code=404, detail="Task not found")
         if task["user_id"] != user_id:
+            logger.error(f"User {user_id} not authorized for task {task_id}")
             raise HTTPException(status_code=403, detail="Not authorized to access this task")
 
         # Get video path from task metadata
         metadata = task.get("metadata") or {}
         video_path = metadata.get("video_path")
 
+        logger.info(f"Task {task_id}: video_path={video_path}")
+
         if not video_path:
+            logger.error(f"No video_path in metadata for task {task_id}")
             raise HTTPException(status_code=404, detail="Video path not found for this task")
 
         video_file = Path(video_path)
+
+        # Check if downloads directory exists and list its contents
+        downloads_dir = Path("/app/downloads")
+        logger.info(f"Downloads dir exists: {downloads_dir.exists()}")
+        if downloads_dir.exists():
+            try:
+                files = list(downloads_dir.iterdir())
+                logger.info(f"Downloads dir contents: {[str(f.name) for f in files[:10]]}")
+            except Exception as e:
+                logger.error(f"Cannot list downloads dir: {e}")
+
+        logger.info(f"Checking video file: {video_file}, exists={video_file.exists()}, is_file={video_file.is_file()}")
+
         if not video_file.exists():
+            logger.error(f"Video file does not exist: {video_path}")
             raise HTTPException(status_code=404, detail="Video file not found")
+
+        if not video_file.is_file():
+            logger.error(f"Video path is not a file: {video_path}")
+            raise HTTPException(status_code=404, detail="Video path is not a file")
+
+        file_size = video_file.stat().st_size
+        logger.info(f"Serving video file: {video_file}, size={file_size} bytes")
 
         return FileResponse(
             path=str(video_file),

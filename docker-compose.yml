@@ -50,6 +50,7 @@ services:
       - ./backend/clips:/app/clips
       - ./backend/fonts:/app/fonts
       - ./backend/transitions:/app/transitions
+      - ./backend/downloads:/app/downloads
       - ${WHISPER_CACHE_HOST_DIR:-./backend/.cache/whisper}:/root/.cache/whisper
     environment:
       - PYTHONPATH=/app
@@ -107,6 +108,7 @@ services:
       - ./backend/clips:/app/clips
       - ./backend/fonts:/app/fonts
       - ./backend/transitions:/app/transitions
+      - ./backend/downloads:/app/downloads
       - ${WHISPER_CACHE_HOST_DIR:-./backend/.cache/whisper}:/root/.cache/whisper
     environment:
       - PYTHONPATH=/app
@@ -163,6 +165,7 @@ services:
       - ./backend/clips:/app/clips
       - ./backend/fonts:/app/fonts
       - ./backend/transitions:/app/transitions
+      - ./backend/downloads:/app/downloads
       - ${WHISPER_CACHE_HOST_DIR:-./backend/.cache/whisper}:/root/.cache/whisper
     environment:
       - PYTHONPATH=/app
@@ -218,6 +221,7 @@ services:
       - ./backend/clips:/app/clips
       - ./backend/fonts:/app/fonts
       - ./backend/transitions:/app/transitions
+      - ./backend/downloads:/app/downloads
       - ${WHISPER_CACHE_HOST_DIR:-./backend/.cache/whisper}:/root/.cache/whisper
     environment:
       - PYTHONPATH=/app

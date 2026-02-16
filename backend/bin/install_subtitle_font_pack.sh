@@ -61,6 +61,7 @@ FONT_PACK=(
   "BebasNeue-Regular.ttf|https://raw.githubusercontent.com/google/fonts/main/ofl/bebasneue/BebasNeue-Regular.ttf"
   "Inter-Variable.ttf|https://raw.githubusercontent.com/google/fonts/main/ofl/inter/Inter%5Bopsz%2Cwght%5D.ttf"
   "Lato-Bold.ttf|https://raw.githubusercontent.com/google/fonts/main/ofl/lato/Lato-Bold.ttf"
+  "NotoSans-Regular.ttf|https://raw.githubusercontent.com/google/fonts/main/ofl/notosans/NotoSans%5Bwdth%2Cwght%5D.ttf"
   "OpenSans-Variable.ttf|https://raw.githubusercontent.com/google/fonts/main/ofl/opensans/OpenSans%5Bwdth%2Cwght%5D.ttf"
   "Oswald-Variable.ttf|https://raw.githubusercontent.com/google/fonts/main/ofl/oswald/Oswald%5Bwght%5D.ttf"
   "Poppins-SemiBold.ttf|https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/Poppins-SemiBold.ttf"

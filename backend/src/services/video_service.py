@@ -236,10 +236,17 @@ class VideoService:
         If srt_content is provided, it will be parsed directly instead of transcription.
         """
         logger.info(f"Generating transcript for: {video_path}")
+        
+        # If SRT content is provided, override provider to "srt" to skip AI transcription
+        effective_provider = transcription_provider
+        if srt_content and isinstance(srt_content, str) and srt_content.strip():
+            effective_provider = "srt"
+            logger.info(f"User-provided SRT content detected, using 'srt' provider to skip AI transcription")
+        
         transcript = await run_in_thread(
             get_video_transcript,
             str(video_path),
-            transcription_provider,
+            effective_provider,
             assembly_api_key,
             whisper_chunking_enabled,
             whisper_chunk_duration_seconds,

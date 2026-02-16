@@ -10,7 +10,7 @@ TEXT_TRANSFORM_OPTIONS = {"none", "uppercase", "lowercase", "capitalize"}
 TEXT_ALIGN_OPTIONS = {"left", "center", "right"}
 
 DEFAULT_SUBTITLE_STYLE: Dict[str, Any] = {
-    "font_family": "TikTokSans-Regular",
+    "font_family": "NotoSans-Regular",
     "font_size": 24,
     "font_color": "#FFFFFF",
     "font_weight": 600,

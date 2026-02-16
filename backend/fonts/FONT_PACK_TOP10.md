@@ -17,6 +17,7 @@ Installed files:
 - `BebasNeue-Regular.ttf`
 - `Inter-Variable.ttf`
 - `Lato-Bold.ttf`
+- `NotoSans-Regular.ttf` (Universal UTF-8 support)
 - `OpenSans-Variable.ttf`
 - `Oswald-Variable.ttf`
 - `Poppins-SemiBold.ttf`

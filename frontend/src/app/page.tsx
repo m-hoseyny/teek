@@ -157,7 +157,7 @@ export default function Home() {
   const [isUploadingFont, setIsUploadingFont] = useState(false);
   const [fontUploadMessage, setFontUploadMessage] = useState<string | null>(null);
   const [fontUploadError, setFontUploadError] = useState<string | null>(null);
-  const [useCustomSrt, setUseCustomSrt] = useState(false);
+  const [useCustomSrt, setUseCustomSrt] = useState(true);
   const [srtFile, setSrtFile] = useState<File | null>(null);
   const [srtFileName, setSrtFileName] = useState<string | null>(null);
   const srtInputRef = useRef<HTMLInputElement | null>(null);
@@ -1018,6 +1018,14 @@ export default function Home() {
                           </div>
                         )}
                       </div>
+                    </div>
+                  )}
+
+                  {!useCustomSrt && (
+                    <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                      <p className="text-xs text-amber-800">
+                        Warning: AI-generated transcripts will consume significant tokens and may increase processing costs.
+                      </p>
                     </div>
                   )}
                 </div>

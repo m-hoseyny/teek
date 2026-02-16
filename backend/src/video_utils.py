@@ -44,14 +44,33 @@ _mediapipe_detector_tls = threading.local()
 class VideoProcessor:
     """Handles video processing operations with optimized settings."""
 
-    def __init__(self, font_family: str = "THEBOLDFONT-FREEVERSION", font_size: int = 24, font_color: str = "#FFFFFF"):
+    # System fonts with broad Unicode/UTF-8 support (Arabic, Persian, etc.)
+    SYSTEM_UNICODE_FONTS = [
+        "/usr/share/fonts/Noto_Sans_Arabic/NotoSansArabic-VariableFont_wdth,wght.ttf",
+        "/usr/share/fonts/Noto_Sans_Arabic/static/NotoSansArabic-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/Lalezar/Lalezar-Regular.ttf",
+    ]
+
+    def __init__(self, font_family: str = "NotoSans-Regular", font_size: int = 24, font_color: str = "#FFFFFF"):
         self.font_family = font_family
         self.font_size = font_size
         self.font_color = font_color
         self.font_path = str(Path(__file__).parent.parent / "fonts" / f"{font_family}.ttf")
-        # Fallback to default font if custom font doesn't exist
+        # Fallback to NotoSans-Regular font if custom font doesn't exist
         if not Path(self.font_path).exists():
-            self.font_path = str(Path(__file__).parent.parent / "fonts" / "THEBOLDFONT-FREEVERSION.ttf")
+            logger.warning(f"Font {font_family} not found, falling back to NotoSans-Regular")
+            self.font_path = str(Path(__file__).parent.parent / "fonts" / "NotoSans-Regular.ttf")
+        # Store a Unicode-compatible font path for RTL/non-Latin text
+        self.unicode_font_path = self._resolve_unicode_font()
+
+    def _resolve_unicode_font(self) -> str:
+        """Find a system font with broad Unicode support (Arabic, Persian, etc.)."""
+        for font_path in self.SYSTEM_UNICODE_FONTS:
+            if Path(font_path).exists():
+                return font_path
+        # Ultimate fallback to the standard font
+        return self.font_path
 
     def get_optimal_encoding_settings(self, target_quality: str = "high") -> Dict[str, Any]:
         """Get optimal encoding settings for different quality levels."""
@@ -740,8 +759,8 @@ def cache_transcript_data(video_path: Path, transcript: Union[Dict[str, Any], An
 
     cache_data = {"words": words_data, "text": transcript_text}
 
-    with open(cache_path, 'w') as f:
-        json.dump(cache_data, f)
+    with open(cache_path, 'w', encoding='utf-8') as f:
+        json.dump(cache_data, f, ensure_ascii=False)
 
     logger.info(f"Cached {len(words_data)} words to {cache_path}")
 
@@ -761,7 +780,7 @@ def load_cached_transcript_data(video_path: Path) -> Optional[Dict]:
         return None
 
     try:
-        with open(cache_path, 'r') as f:
+        with open(cache_path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception as e:
         logger.warning(f"Failed to load transcript cache: {e}")
@@ -1176,6 +1195,27 @@ def _apply_letter_spacing(text: str, spacing: int) -> str:
     return " ".join(spaced_words)
 
 
+def _contains_non_latin_chars(text: str) -> bool:
+    """Check if text contains non-Latin characters (Arabic, Persian, Hebrew, etc.)."""
+    for char in text:
+        code = ord(char)
+        # Arabic block: U+0600 - U+06FF
+        # Arabic Supplement: U+0750 - U+077F
+        # Arabic Extended-A: U+08A0 - U+08FF
+        # Arabic Presentation Forms-A: U+FB50 - U+FDFF
+        # Arabic Presentation Forms-B: U+FE70 - U+FEFF
+        # Hebrew: U+0590 - U+05FF
+        # Persian-specific characters are within Arabic blocks
+        if (0x0600 <= code <= 0x06FF or
+            0x0750 <= code <= 0x077F or
+            0x08A0 <= code <= 0x08FF or
+            0xFB50 <= code <= 0xFDFF or
+            0xFE70 <= code <= 0xFEFF or
+            0x0590 <= code <= 0x05FF):
+            return True
+    return False
+
+
 def _shadow_offsets(base_x: int, base_y: int, blur: int) -> List[Tuple[int, int]]:
     offsets = [(base_x, base_y)]
     if blur <= 0:
@@ -1303,9 +1343,15 @@ def create_assemblyai_subtitles(
             subtitle_box_width = max(240, int(video_width * 0.92))
             subtitle_box_height = max(62, int(final_font_size * 2.8))
 
+            # Use Unicode-compatible font for non-Latin text (Arabic, Persian, etc.)
+            effective_font_path = processor.font_path
+            if _contains_non_latin_chars(text):
+                effective_font_path = processor.unicode_font_path
+                logger.debug(f"Using Unicode font for non-Latin text: {text[:30]}...")
+
             text_clip_kwargs = {
                 "text": text,
-                "font": processor.font_path,
+                "font": effective_font_path,
                 "font_size": final_font_size,
                 "color": style["font_color"],
                 "stroke_color": style["stroke_color"],
@@ -1348,7 +1394,7 @@ def create_assemblyai_subtitles(
                 try:
                     shadow_kwargs = {
                         "text": text,
-                        "font": processor.font_path,
+                        "font": effective_font_path,
                         "font_size": final_font_size,
                         "color": shadow_color,
                         "stroke_color": shadow_color,
@@ -1398,7 +1444,7 @@ def create_optimized_clip(
     end_time: float,
     output_path: Union[Path, str],
     add_subtitles: bool = True,
-    font_family: str = "THEBOLDFONT-FREEVERSION",
+    font_family: str = "NotoSans-Regular",
     font_size: int = 24,
     font_color: str = "#FFFFFF",
     subtitle_style: Optional[Dict[str, Any]] = None,
@@ -1485,7 +1531,7 @@ def create_clips_from_segments(
     video_path: Union[Path, str],
     segments: List[Dict[str, Any]],
     output_dir: Union[Path, str],
-    font_family: str = "THEBOLDFONT-FREEVERSION",
+    font_family: str = "NotoSans-Regular",
     font_size: int = 24,
     font_color: str = "#FFFFFF",
     subtitle_style: Optional[Dict[str, Any]] = None,
@@ -1664,7 +1710,7 @@ def create_clips_with_transitions(
     video_path: Union[Path, str],
     segments: List[Dict[str, Any]],
     output_dir: Union[Path, str],
-    font_family: str = "THEBOLDFONT-FREEVERSION",
+    font_family: str = "NotoSans-Regular",
     font_size: int = 24,
     font_color: str = "#FFFFFF",
     subtitle_style: Optional[Dict[str, Any]] = None,

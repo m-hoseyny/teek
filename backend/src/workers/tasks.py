@@ -147,16 +147,24 @@ async def transcribe_video_task(
             # Store the video path in task metadata for later retrieval by generate_clips_from_transcript
             await task_service.task_repo.update_task_video_path(db, task_id, str(video_path))
 
-            await update_progress(30, "Video downloaded. Starting transcription...")
+            # Extract SRT content if provided by user
+            srt_content = transcription_options.get("srt_content") if transcription_options else None
+
+            # If user provided SRT content, override provider to "srt" to skip AI transcription
+            effective_provider = transcription_provider
+            if srt_content and srt_content.strip():
+                effective_provider = "srt"
+                logger.info(f"User-provided SRT content detected, skipping AI transcription")
+                await update_progress(30, "Processing user-provided subtitles...")
+            else:
+                await update_progress(30, "Video downloaded. Starting AI transcription...")
 
             # Transcribe video or use provided SRT content
             from ..video_utils import get_video_transcript
             
-            srt_content = transcription_options.get("srt_content") if transcription_options else None
-            
             transcript = get_video_transcript(
                 video_path,
-                transcription_provider=transcription_provider,
+                transcription_provider=effective_provider,
                 assembly_api_key=assembly_api_key,
                 whisper_chunking_enabled=transcription_options.get("whisper_chunking_enabled") if transcription_options else None,
                 whisper_chunk_duration_seconds=transcription_options.get("whisper_chunk_duration_seconds") if transcription_options else None,
