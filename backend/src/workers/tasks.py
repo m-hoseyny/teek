@@ -131,13 +131,21 @@ async def transcribe_video_task(
             # Download video
             await update_progress(10, "Downloading video...")
             from pathlib import Path
-            from ..services.video_service import download_video
 
             temp_dir = Path(config.temp_dir)
-            video_path = await download_video(url, source_type, temp_dir, progress_callback=update_progress)
+
+            if source_type == "youtube":
+                video_path = await VideoService.download_video(url, progress_callback=update_progress)
+            elif source_type == "video_url":
+                video_path = await VideoService.download_video_from_url(url, progress_callback=update_progress)
+            else:  # uploaded_file
+                video_path = VideoService.validate_uploaded_video_path(url)
 
             if not video_path or not Path(video_path).exists():
                 raise ValueError("Failed to download video")
+
+            # Store the video path in task metadata for later retrieval by generate_clips_from_transcript
+            await task_service.task_repo.update_task_video_path(db, task_id, str(video_path))
 
             await update_progress(30, "Video downloaded. Starting transcription...")
 
@@ -158,24 +166,86 @@ async def transcribe_video_task(
 
             await update_progress(50, "Transcription complete!")
 
-            # Save transcript to task
-            await task_service.task_repo.update_editable_transcript(db, task_id, transcript)
-
-            # If review is enabled, stop here and set status to awaiting_review
+            # If review is enabled, run AI analysis first, create clip records, then pause
             if transcript_review_enabled:
-                await task_service.task_repo.update_task_status(
-                    db, task_id, "awaiting_review", progress=50,
-                    progress_message="Transcription complete. Waiting for user review..."
-                )
-                await progress.update(50, "Transcription complete! Please review and edit the transcript, then click 'Generate Clips'.")
+                await update_progress(55, "Analyzing transcript with AI...")
 
-                logger.info(f"Task {task_id} paused for transcript review")
+                selected_ai_provider = (ai_provider or "openai").strip().lower()
+                ai_key_attempts, _ = await task_service.get_effective_user_ai_api_key_attempts(
+                    user_id=user_id,
+                    provider=selected_ai_provider,
+                    zai_routing_mode=ai_routing_mode,
+                )
+                ai_api_key = ai_key_attempts[0]["key"] if ai_key_attempts else None
+
+                # Analyze transcript
+                from ..ai import get_most_relevant_parts_by_transcript
+
+                analysis_result = await get_most_relevant_parts_by_transcript(
+                    transcript,
+                    ai_provider=selected_ai_provider,
+                    ai_api_key=ai_api_key,
+                )
+
+                segments = [
+                    {
+                        "start_time": seg.start_time,
+                        "end_time": seg.end_time,
+                        "text": seg.text,
+                        "relevance_score": seg.relevance_score,
+                        "reasoning": seg.reasoning,
+                    }
+                    for seg in analysis_result.most_relevant_segments
+                ]
+
+                if not segments:
+                    await task_service.task_repo.update_task_status(
+                        db, task_id, "completed", progress=100,
+                        progress_message="No clips generated: No valid segments found in transcript"
+                    )
+                    await progress.complete()
+                    return {"task_id": task_id, "clips_created": 0, "message": "No valid segments found"}
+
+                await update_progress(70, f"Creating {len(segments)} clip records for review...")
+
+                # Create clip records in DB (without video files yet)
+                clip_ids = []
+                for i, seg in enumerate(segments):
+                    clip_id = await task_service.clip_repo.create_clip(
+                        db,
+                        task_id=task_id,
+                        filename=f"clip_{i+1:03d}.mp4",  # Placeholder filename
+                        file_path="",  # Empty path - video not generated yet
+                        start_time=seg["start_time"],
+                        end_time=seg["end_time"],
+                        duration=0,  # Will be calculated when video is generated
+                        text=seg["text"],  # This is the transcript the user can edit
+                        relevance_score=seg["relevance_score"],
+                        reasoning=seg["reasoning"],
+                        clip_order=i + 1
+                    )
+                    clip_ids.append(clip_id)
+
+                # Update task with clip IDs and awaiting_review status
+                await task_service.task_repo.update_task_clips(db, task_id, clip_ids)
+
+                # Save the full transcript too
+                await task_service.task_repo.update_editable_transcript(db, task_id, transcript)
+
+                await task_service.task_repo.update_task_status(
+                    db, task_id, "awaiting_review", progress=70,
+                    progress_message=f"AI found {len(segments)} clips. Please review and edit the subtitles for each clip, then click 'Generate Clips' to create the videos."
+                )
+                await progress.update(70, f"AI analysis complete! Found {len(segments)} clips. Please review and edit the subtitles, then click 'Generate Clips'.")
+
+                logger.info(f"Task {task_id} paused for clip transcript review with {len(segments)} clips")
 
                 return {
                     "task_id": task_id,
                     "status": "awaiting_review",
-                    "message": "Transcription complete. Waiting for user review.",
+                    "message": f"AI found {len(segments)} clips. Waiting for user to review clip subtitles.",
                     "transcript": transcript,
+                    "clips_found": len(segments),
                 }
 
             # If review is NOT enabled, continue with full processing
@@ -426,18 +496,12 @@ async def process_video_task(
 async def generate_clips_from_transcript(
     ctx: Dict[str, Any],
     task_id: str,
-    transcript: str,
-    source_id: str,
     user_id: str,
-    font_family: str = "TikTokSans-Regular",
-    font_size: int = 24,
-    font_color: str = "#FFFFFF",
-    transcription_provider: str = "local",
-    ai_provider: str = "openai",
 ) -> Dict[str, Any]:
     """
-    Worker task to generate clips from an edited transcript.
-    This is called after the user has reviewed and approved the transcript.
+    Worker task to generate video files from reviewed clip records.
+    This is called after the user has reviewed and edited clip transcripts.
+    It fetches the existing clips from DB and generates the actual video files.
     """
     from ..database import AsyncSessionLocal
     from ..config import Config
@@ -446,7 +510,7 @@ async def generate_clips_from_transcript(
     from ..repositories.source_repository import SourceRepository
     from ..workers.progress import ProgressTracker
 
-    logger.info(f"Worker generating clips for task {task_id} from edited transcript")
+    logger.info(f"Worker generating video files for task {task_id}")
 
     config = Config()
     progress = ProgressTracker(ctx['redis'], task_id)
@@ -455,19 +519,32 @@ async def generate_clips_from_transcript(
         task_service = TaskService(db)
 
         try:
+            # Get the task with clips
+            task = await task_service.get_task_with_clips(task_id)
+            if not task:
+                raise ValueError(f"Task {task_id} not found")
+
+            clips = task.get("clips", [])
+            if not clips:
+                raise ValueError(f"No clips found for task {task_id}")
+
             # Get the source to find the video path
             source_repo = SourceRepository()
-            source = await source_repo.get_source_by_id(db, source_id)
+            source = await source_repo.get_source_by_id(db, task.get("source_id"))
             if not source:
-                raise ValueError(f"Source {source_id} not found")
+                raise ValueError(f"Source not found for task {task_id}")
 
             # Determine video path from source
-            from ..video_utils import get_cached_formatted_transcript, get_video_transcript
             from pathlib import Path
 
-            # For YouTube sources, we need to find the downloaded video
+            # For YouTube/video_url sources, find the downloaded video
             video_path = None
-            if source.get("type") == "youtube":
+            source_type = source.get("type")
+            source_url = source.get("url", "")
+
+            logger.info(f"Looking for video file for source type={source_type}, url={source_url}")
+
+            if source_type in ["youtube", "video_url"]:
                 # Look for downloaded video in temp directory
                 temp_dir = Path(config.temp_dir)
                 downloads_dir = temp_dir / "downloads"
@@ -478,105 +555,122 @@ async def generate_clips_from_transcript(
                     if video_files:
                         video_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
                         video_path = video_files[0]
+                        logger.info(f"Found downloaded video: {video_path}")
+            elif source_type == "uploaded_file":
+                # For uploaded files, try multiple possible paths
+                possible_paths = []
+
+                # The URL might be a relative path like /uploads/filename.mp4
+                if source_url:
+                    # Try as absolute path first
+                    possible_paths.append(Path(source_url))
+                    # Try relative to temp_dir
+                    possible_paths.append(Path(config.temp_dir) / source_url.lstrip("/"))
+                    # Try in uploads subdirectory
+                    possible_paths.append(Path(config.temp_dir) / "uploads" / Path(source_url).name)
+                    # Try the URL as a direct filename in temp
+                    possible_paths.append(Path(config.temp_dir) / Path(source_url).name)
+
+                # Also check if there's a video file referenced in task metadata
+                task_metadata = task.get("metadata") or {}
+                if task_metadata.get("video_path"):
+                    possible_paths.append(Path(task_metadata["video_path"]))
+
+                # Find the first existing path
+                for path in possible_paths:
+                    logger.info(f"Checking path: {path} (exists: {path.exists()})")
+                    if path.exists():
+                        video_path = path
+                        logger.info(f"Found uploaded video at: {video_path}")
+                        break
+
+                # If still not found, search in temp directory for recent uploads
+                if not video_path:
+                    temp_dir = Path(config.temp_dir)
+                    uploads_dir = temp_dir / "uploads"
+                    if uploads_dir.exists():
+                        video_files = list(uploads_dir.glob("*.mp4")) + list(uploads_dir.glob("*.mov")) + list(uploads_dir.glob("*.avi")) + list(uploads_dir.glob("*.mkv")) + list(uploads_dir.glob("*.webm"))
+                        if video_files:
+                            # Sort by modification time, most recent first
+                            video_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                            # Try to match by filename from source_url
+                            source_filename = Path(source_url).name if source_url else None
+                            if source_filename:
+                                for vf in video_files:
+                                    if vf.name == source_filename or vf.stem in source_filename:
+                                        video_path = vf
+                                        logger.info(f"Found uploaded video by filename match: {video_path}")
+                                        break
+                            # If no match, use most recent
+                            if not video_path:
+                                video_path = video_files[0]
+                                logger.info(f"Using most recent uploaded video: {video_path}")
 
             if not video_path or not video_path.exists():
-                raise ValueError(f"Video file not found for source {source_id}")
+                logger.error(f"Video file not found. Checked paths: {[str(p) for p in possible_paths if 'possible_paths' in locals()]}")
+                raise ValueError(f"Video file not found for source type={source_type}, url={source_url}")
 
-            # Analyze the edited transcript to find segments
-            from ..ai import get_most_relevant_parts_by_transcript
+            await progress.update(50, f"Generating {len(clips)} video clips with edited subtitles...")
 
-            await progress.update(55, "Analyzing edited transcript...")
-
-            ai_key_attempts, _ = await task_service.get_effective_user_ai_api_key_attempts(
-                user_id=user_id,
-                provider=ai_provider,
-            )
-            ai_api_key = ai_key_attempts[0]["key"] if ai_key_attempts else None
-
-            analysis_result = await get_most_relevant_parts_by_transcript(
-                transcript,
-                ai_provider=ai_provider,
-                ai_api_key=ai_api_key,
-            )
-
+            # Build segments from clips (using edited text)
             segments = [
                 {
-                    "start_time": seg.start_time,
-                    "end_time": seg.end_time,
-                    "text": seg.text,
-                    "relevance_score": seg.relevance_score,
-                    "reasoning": seg.reasoning,
+                    "start_time": clip["start_time"],
+                    "end_time": clip["end_time"],
+                    "text": clip["text"],  # Use the edited text from DB
+                    "relevance_score": clip.get("relevance_score", 0.5),
+                    "reasoning": clip.get("reasoning", ""),
                 }
-                for seg in analysis_result.most_relevant_segments
+                for clip in sorted(clips, key=lambda x: x.get("clip_order", 0))
             ]
-
-            if not segments:
-                await task_service.task_repo.update_task_status(
-                    db,
-                    task_id,
-                    "completed",
-                    progress=100,
-                    progress_message="No clips generated: No valid segments found in edited transcript"
-                )
-                await progress.complete()
-                return {"task_id": task_id, "clips_created": 0, "message": "No valid segments found"}
-
-            await progress.update(70, f"Creating {len(segments)} video clips...")
 
             # Create the clips
             clips_result = await VideoService.create_video_clips(
-                video_path=video_path,
+                video_path=Path(video_path),
                 segments=segments,
-                font_family=font_family,
-                font_size=font_size,
-                font_color=font_color,
+                font_family=task.get("font_family", "TikTokSans-Regular"),
+                font_size=task.get("font_size", 24),
+                font_color=task.get("font_color", "#FFFFFF"),
                 progress_callback=lambda p, m, meta=None: progress.update(p, m, metadata=meta),
             )
 
-            # Save clips to database
-            await progress.update(95, "Saving clips...")
+            # Update clip records with actual file paths and durations
+            await progress.update(95, "Saving clip files...")
 
-            clip_ids = []
             for i, clip_info in enumerate(clips_result["clips"]):
-                clip_id = await task_service.clip_repo.create_clip(
+                clip = clips[i]
+                # Update the clip with actual file path and duration
+                await task_service.clip_repo.update_clip(
                     db,
-                    task_id=task_id,
-                    filename=clip_info["filename"],
-                    file_path=clip_info["path"],
-                    start_time=clip_info["start_time"],
-                    end_time=clip_info["end_time"],
-                    duration=clip_info["duration"],
-                    text=clip_info["text"],
-                    relevance_score=clip_info["relevance_score"],
-                    reasoning=clip_info["reasoning"],
-                    clip_order=i + 1
+                    clip["id"],
+                    {
+                        "filename": clip_info["filename"],
+                        "file_path": clip_info["path"],
+                        "duration": clip_info["duration"],
+                    }
                 )
-                clip_ids.append(clip_id)
 
-            # Update task with clip IDs
-            await task_service.task_repo.update_task_clips(db, task_id, clip_ids)
-
-            completion_message = f"Generated {len(clip_ids)} clips from edited transcript"
+            completion_message = f"Generated {len(clips_result['clips'])} video clips"
             await task_service.task_repo.update_task_status(
                 db, task_id, "completed", progress=100, progress_message=completion_message
             )
 
             await progress.complete()
-            logger.info(f"Task {task_id} completed with {len(clip_ids)} clips from edited transcript")
+            logger.info(f"Task {task_id} completed with {len(clips_result['clips'])} video clips")
 
             return {
                 "task_id": task_id,
-                "clips_created": len(clip_ids),
+                "clips_created": len(clips_result["clips"]),
                 "message": completion_message
             }
 
         except Exception as e:
-            logger.error(f"Error generating clips from transcript for task {task_id}: {e}", exc_info=True)
+            logger.error(f"Error generating clip videos for task {task_id}: {e}", exc_info=True)
             await task_service.task_repo.update_task_status(
                 db,
                 task_id,
                 "error",
-                progress_message=f"Clip generation failed: {str(e)}"
+                progress_message=f"Video generation failed: {str(e)}"
             )
             await progress.error(str(e))
             raise

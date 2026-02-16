@@ -72,11 +72,8 @@ class VideoProcessor:
         return settings.get(target_quality, settings["high"])
 
 def _get_transcription_provider(provider_override: Optional[str] = None) -> str:
-    provider = (provider_override or config.transcription_provider or "local").strip().lower()
-    if provider not in {"local", "assemblyai"}:
-        logger.warning(f"Unknown transcription provider '{provider}', falling back to local")
-        return "local"
-    return provider
+    # Force AssemblyAI - local Whisper is disabled
+    return "assemblyai"
 
 
 def _resolve_whisper_device() -> Tuple[str, bool]:
@@ -623,6 +620,19 @@ def get_video_transcript(
     """Get transcript using configured provider with word-level timings."""
     video_path = Path(video_path)
     logger.info(f"Getting transcript for: {video_path}")
+
+    # Check for cached transcript data first
+    cached_data = load_cached_transcript_data(video_path)
+    if cached_data:
+        logger.info(f"Using cached transcript data for: {video_path}")
+        formatted_transcript = build_formatted_transcript_from_words(cached_data["words"])
+        formatted_lines = [line for line in formatted_transcript.splitlines() if line.strip()]
+        result = "\n".join(formatted_lines)
+        logger.info(
+            f"Transcript formatted from cache: {len(formatted_lines)} segments, "
+            f"{len(cached_data['words'])} words, {len(result)} chars"
+        )
+        return result
 
     provider = _get_transcription_provider(transcription_provider)
     logger.info(f"Transcription provider: {provider}")

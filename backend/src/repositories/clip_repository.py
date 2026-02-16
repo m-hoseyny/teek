@@ -121,6 +121,31 @@ class ClipRepository:
         return deleted_count
 
     @staticmethod
+    async def update_clip(db: AsyncSession, clip_id: str, updates: Dict[str, Any]) -> None:
+        """Update a clip's fields."""
+        # Build dynamic SET clause
+        set_parts = []
+        params = {"clip_id": clip_id}
+
+        for key, value in updates.items():
+            if key in ["filename", "file_path", "start_time", "end_time", "duration", "text", "relevance_score", "reasoning", "clip_order"]:
+                set_parts.append(f"{key} = :{key}")
+                params[key] = value
+
+        if not set_parts:
+            return
+
+        query = f"""
+            UPDATE generated_clips
+            SET {', '.join(set_parts)}, updated_at = NOW()
+            WHERE id = :clip_id
+        """
+
+        await db.execute(sql_text(query), params)
+        await db.commit()
+        logger.debug(f"Updated clip {clip_id}")
+
+    @staticmethod
     async def delete_clip(db: AsyncSession, clip_id: str) -> None:
         """Delete a single clip by ID."""
         await db.execute(

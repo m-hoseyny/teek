@@ -21,7 +21,7 @@ import {
 import { useSession } from "@/lib/auth-client";
 import { ArrowLeft, Download, Clock, Star, AlertCircle, Trash2, Edit2, X, Check, FileText, Play, Save } from "lucide-react";
 import Link from "next/link";
-import DynamicVideoPlayer from "@/components/dynamic-video-player";
+import DynamicVideoPlayer, { type VideoPlayerRef } from "@/components/dynamic-video-player";
 
 interface Clip {
   id: string;
@@ -53,6 +53,7 @@ interface TaskDetails {
   font_family?: string;
   font_size?: number;
   font_color?: string;
+  source_video_url?: string;
 }
 
 type StageKey = "download" | "transcript" | "analysis" | "clips" | "finalizing";
@@ -139,6 +140,8 @@ export default function TaskPage() {
   const [task, setTask] = useState<TaskDetails | null>(null);
   const [clips, setClips] = useState<Clip[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [sourceVideoUrl, setSourceVideoUrl] = useState<string | null>(null);
+  const [isLoadingSourceVideo, setIsLoadingSourceVideo] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [progressMessage, setProgressMessage] = useState("");
@@ -147,6 +150,79 @@ export default function TaskPage() {
   const [isEditing, setIsEditing] = useState(false);
   const [editedTitle, setEditedTitle] = useState("");
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [editingClipId, setEditingClipId] = useState<string | null>(null);
+  const [editedClipData, setEditedClipData] = useState<{ start_time: string; end_time: string; text: string }>({ start_time: "", end_time: "", text: "" });
+  const [isSavingClip, setIsSavingClip] = useState(false);
+
+  const handleEditClip = (clip: Clip, elementId?: string) => {
+    setEditingClipId(clip.id);
+    setEditedClipData({
+      start_time: clip.start_time,
+      end_time: clip.end_time,
+      text: clip.text || ""
+    });
+    // Jump to clip start time in the video player
+    seekToClipStart(clip.start_time);
+    // Scroll the editing clip card to top of viewport for better UX
+    if (elementId) {
+      setTimeout(() => {
+        const element = document.getElementById(elementId);
+        element?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 100);
+    }
+  };
+
+  const handleSaveClip = async (clipId: string) => {
+    if (!userId || !taskId) return;
+    
+    try {
+      setIsSavingClip(true);
+      setTranscriptError(null);
+      
+      // Save time
+      const timeResponse = await fetch(`${apiUrl}/tasks/${taskId}/clips/${clipId}/time`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", user_id: userId },
+        body: JSON.stringify({ 
+          start_time: editedClipData.start_time, 
+          end_time: editedClipData.end_time 
+        }),
+      });
+      
+      if (!timeResponse.ok) {
+        const errorData = await timeResponse.json().catch(() => ({ } as { detail?: string }));
+        throw new Error(errorData.detail || "Failed to save clip time");
+      }
+      
+      // Save transcript
+      const textResponse = await fetch(`${apiUrl}/tasks/${taskId}/clips/${clipId}/transcript`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", user_id: userId },
+        body: JSON.stringify({ text: editedClipData.text }),
+      });
+      
+      if (!textResponse.ok) {
+        const errorData = await textResponse.json().catch(() => ({ } as { detail?: string }));
+        throw new Error(errorData.detail || "Failed to save clip transcript");
+      }
+      
+      // Refresh task to get updated clips
+      await fetchTaskStatus();
+      setEditingClipId(null);
+    } catch (err) {
+      console.error("Error saving clip:", err);
+      setTranscriptError(err instanceof Error ? err.message : "Failed to save clip");
+    } finally {
+      setIsSavingClip(false);
+    }
+  };
+
+  const handleCancelEditClip = () => {
+    setEditingClipId(null);
+    setEditedClipData({ start_time: "", end_time: "", text: "" });
+  };
+
+  const clipsContainerRef = useRef<HTMLDivElement>(null);
   const [deletingClipId, setDeletingClipId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isEditingTranscript, setIsEditingTranscript] = useState(false);
@@ -158,6 +234,7 @@ export default function TaskPage() {
   const progressRef = useRef(progress);
   const progressMessageRef = useRef(progressMessage);
   const sourceTypeRef = useRef<string | undefined>(task?.source_type);
+  const sourcePlayerRef = useRef<VideoPlayerRef | null>(null);
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
   const taskId = Array.isArray(params.id) ? params.id[0] : params.id;
   const userId = session?.user?.id;
@@ -184,12 +261,49 @@ export default function TaskPage() {
     }
   }, [apiUrl, taskId, userId]);
 
-  // Fetch transcript when task status changes to awaiting_review
+  // Fetch transcript when task status changes to awaiting_review or completed
   useEffect(() => {
-    if (task?.status === "awaiting_review" || task?.status === "transcribed") {
+    if (task?.status === "awaiting_review" || task?.status === "transcribed" || task?.status === "completed") {
       fetchTranscript();
     }
   }, [task?.status, fetchTranscript]);
+
+  // Fetch source video URL when task is in review or completed status
+  const fetchSourceVideo = useCallback(async () => {
+    if (!taskId || !userId) return;
+    
+    try {
+      setIsLoadingSourceVideo(true);
+      const response = await fetch(`${apiUrl}/tasks/${taskId}/source-video`, {
+        headers: { user_id: userId },
+      });
+      
+      if (!response.ok) {
+        if (response.status === 404) {
+          setSourceVideoUrl(null);
+          return;
+        }
+        throw new Error(`Failed to fetch source video: ${response.status}`);
+      }
+      
+      // Create blob URL from the video data so auth headers are properly used
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      setSourceVideoUrl(url);
+    } catch (err) {
+      console.error("Error fetching source video:", err);
+      setSourceVideoUrl(null);
+    } finally {
+      setIsLoadingSourceVideo(false);
+    }
+  }, [apiUrl, taskId, userId]);
+
+  // Fetch source video when task status changes
+  useEffect(() => {
+    if (task?.status === "awaiting_review" || task?.status === "transcribed" || task?.status === "completed") {
+      fetchSourceVideo();
+    }
+  }, [task?.status, fetchSourceVideo]);
 
   useEffect(() => {
     progressRef.current = progress;
@@ -376,6 +490,46 @@ export default function TaskPage() {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const timeToSeconds = (timeStr: string): number => {
+    const parts = timeStr.split(':').map(Number);
+    if (parts.length === 2) {
+      return parts[0] * 60 + parts[1];
+    }
+    if (parts.length === 3) {
+      return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    }
+    return parseInt(timeStr) || 0;
+  };
+
+  const seekToClipStart = (startTime: string) => {
+    if (sourcePlayerRef.current) {
+      const seconds = timeToSeconds(startTime);
+      sourcePlayerRef.current.seekTo(seconds);
+      sourcePlayerRef.current.play();
+    }
+  };
+
+  const playClipSegment = (startTime: string, endTime: string) => {
+    if (!sourcePlayerRef.current) return;
+    
+    const startSec = timeToSeconds(startTime);
+    const endSec = timeToSeconds(endTime);
+    
+    sourcePlayerRef.current.seekTo(startSec);
+    sourcePlayerRef.current.play();
+    
+    // Auto-stop at end time
+    const checkTime = () => {
+      const currentTime = sourcePlayerRef.current?.getCurrentTime() ?? 0;
+      if (currentTime >= endSec) {
+        sourcePlayerRef.current?.pause();
+      } else {
+        requestAnimationFrame(checkTime);
+      }
+    };
+    requestAnimationFrame(checkTime);
   };
 
   const getScoreColor = (score: number) => {
@@ -863,105 +1017,281 @@ export default function TaskPage() {
           </Card>
         ) : task?.status === "awaiting_review" || task?.status === "transcribed" ? (
           <div className="space-y-6">
-            {/* Transcript Review Card */}
-            <Card className="border-amber-200 bg-amber-50/30">
-              <CardContent className="p-6">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
-                    <FileText className="w-5 h-5 text-amber-600" />
+            {/* Two Column Layout: Video Left, Transcript Right */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Left Column: Source Video Player */}
+              {sourceVideoUrl && (
+                <Card className="border-gray-200 overflow-hidden">
+                  <CardContent className="p-0">
+                    <div className="p-4 bg-gray-50 border-b border-gray-200">
+                      <h3 className="font-semibold text-black flex items-center gap-2">
+                        <Play className="w-4 h-4" />
+                        Source Video
+                      </h3>
+                      <p className="text-sm text-gray-600">
+                        Preview clips while editing
+                      </p>
+                    </div>
+                    <div className="bg-black">
+                      <DynamicVideoPlayer
+                        ref={sourcePlayerRef}
+                        src={sourceVideoUrl}
+                        className="w-full max-h-[400px]"
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Right Column: Transcript Review */}
+              <Card className="border-amber-200 bg-amber-50/30">
+                <CardContent className="p-6">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
+                      <FileText className="w-5 h-5 text-amber-600" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-semibold text-black">Review Transcript</h2>
+                      <p className="text-sm text-gray-600">
+                        Edit before generating clips
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <h2 className="text-lg font-semibold text-black">Review Transcript</h2>
-                    <p className="text-sm text-gray-600">
-                      Edit the transcript before generating clips. Changes will affect the AI analysis.
+
+                  {transcriptError && (
+                    <Alert className="mb-4 border-red-200 bg-red-50">
+                      <AlertCircle className="h-4 w-4 text-red-500" />
+                      <AlertDescription className="text-sm text-red-700">
+                        {transcriptError}
+                      </AlertDescription>
+                    </Alert>
+                  )}
+
+                  {isEditingTranscript ? (
+                    <div className="space-y-4">
+                      <textarea
+                        value={editedTranscript}
+                        onChange={(e) => setEditedTranscript(e.target.value)}
+                        className="w-full min-h-[200px] p-4 text-sm font-mono bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent resize-y"
+                        placeholder="Edit the transcript here..."
+                      />
+                      <div className="flex gap-2 justify-end">
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            setEditedTranscript(transcript);
+                            setIsEditingTranscript(false);
+                          }}
+                          disabled={isSavingTranscript}
+                        >
+                          <X className="w-4 h-4 mr-2" />
+                          Cancel
+                        </Button>
+                        <Button
+                          onClick={handleSaveTranscript}
+                          disabled={isSavingTranscript}
+                          className="bg-amber-600 hover:bg-amber-700"
+                        >
+                          {isSavingTranscript ? (
+                            <>
+                              <div className="w-4 h-4 mr-2 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                              Saving...
+                            </>
+                          ) : (
+                            <>
+                              <Save className="w-4 h-4 mr-2" />
+                              Save Changes
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="bg-white border border-gray-200 rounded-lg p-4 max-h-[300px] overflow-y-auto">
+                        <pre className="text-sm text-gray-700 whitespace-pre-wrap font-mono">
+                          {transcript || "Loading transcript..."}
+                        </pre>
+                      </div>
+                      <div className="flex gap-2 justify-end">
+                        <Button
+                          variant="outline"
+                          onClick={() => setIsEditingTranscript(true)}
+                          disabled={!transcript}
+                        >
+                          <Edit2 className="w-4 h-4 mr-2" />
+                          Edit Transcript
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Proposed Clips for Review */}
+            {task?.clips && task.clips.length > 0 && (
+              <div className="space-y-4" ref={clipsContainerRef}>
+                <h3 className="text-lg font-semibold text-black">Proposed Clips ({task.clips.length})</h3>
+                {task.clips.map((clip, index) => (
+                  <Card key={clip.id} id={`clip-card-${clip.id}`} className="overflow-hidden border-gray-200">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-3">
+                          <span className="text-sm font-semibold text-gray-700">
+                            Clip {index + 1}
+                          </span>
+                          <Badge className={getScoreColor(clip.relevance_score)}>
+                            <Star className="w-3 h-3 mr-1" />
+                            {(clip.relevance_score * 100).toFixed(0)}%
+                          </Badge>
+                        </div>
+                        {editingClipId !== clip.id && (
+                          <Button size="sm" variant="ghost" onClick={() => handleEditClip(clip, `clip-card-${clip.id}`)}>
+                            <Edit2 className="w-4 h-4 mr-1" /> Edit
+                          </Button>
+                        )}
+                      </div>
+
+                      {editingClipId === clip.id ? (
+                        <div className="space-y-3">
+                          {/* Editable Time Fields */}
+                          <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium text-gray-600">Start:</span>
+                              <Input
+                                type="text"
+                                value={editedClipData.start_time}
+                                onChange={(e) => setEditedClipData({ ...editedClipData, start_time: e.target.value })}
+                                className="w-24 text-sm"
+                                placeholder="00:00"
+                              />
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium text-gray-600">End:</span>
+                              <Input
+                                type="text"
+                                value={editedClipData.end_time}
+                                onChange={(e) => setEditedClipData({ ...editedClipData, end_time: e.target.value })}
+                                className="w-24 text-sm"
+                                placeholder="00:00"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Editable Transcript */}
+                          <textarea
+                            value={editedClipData.text}
+                            onChange={(e) => setEditedClipData({ ...editedClipData, text: e.target.value })}
+                            className="w-full min-h-[100px] p-3 text-sm bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 resize-y"
+                            placeholder="Edit the clip transcript..."
+                          />
+
+                          {/* Save/Cancel Buttons */}
+                          <div className="flex gap-2 justify-end">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={handleCancelEditClip}
+                              disabled={isSavingClip}
+                            >
+                              <X className="w-4 h-4 mr-1" /> Cancel
+                            </Button>
+                            <Button
+                              size="sm"
+                              onClick={() => handleSaveClip(clip.id)}
+                              disabled={isSavingClip}
+                              className="bg-amber-600 hover:bg-amber-700"
+                            >
+                              {isSavingClip ? (
+                                <div className="w-4 h-4 mr-1 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                              ) : (
+                                <Save className="w-4 h-4 mr-1" />
+                              )}
+                              Save
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-2 text-sm text-gray-600 mb-3">
+                            <span className="font-mono bg-gray-100 px-2 py-1 rounded">
+                              {clip.start_time} - {clip.end_time}
+                            </span>
+                          </div>
+
+                          <p className="text-sm text-gray-800 mb-3 bg-gray-50 p-3 rounded">
+                            {clip.text || "No transcript available"}
+                          </p>
+
+                          {clip.reasoning && (
+                            <p className="text-xs text-gray-500 italic mb-3">
+                              <span className="font-medium">AI reasoning:</span> {clip.reasoning}
+                            </p>
+                          )}
+
+                          <div className="flex flex-wrap gap-2">
+                            {task?.source_video_url && (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => seekToClipStart(clip.start_time)}
+                                >
+                                  <Play className="w-4 h-4 mr-2" />
+                                  Preview at Start
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  onClick={() => playClipSegment(clip.start_time, clip.end_time)}
+                                >
+                                  <Play className="w-4 h-4 mr-2" />
+                                  Play Clip Segment
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+
+            {/* Generate Clips Action */}
+            <Card className="border-green-200 bg-green-50/30">
+              <CardContent className="p-6">
+                <div className="flex items-start gap-4">
+                  <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
+                    <Play className="w-5 h-5 text-green-600" />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-black mb-1">Ready to Generate</h3>
+                    <p className="text-sm text-gray-600 mb-4">
+                      Once you&apos;ve reviewed all the clips and transcript, click below to create the video files with subtitles.
                     </p>
+                    <Button
+                      onClick={handleGenerateClips}
+                      disabled={isGeneratingClips || !transcript}
+                      className="bg-green-600 hover:bg-green-700"
+                      size="lg"
+                    >
+                      {isGeneratingClips ? (
+                        <>
+                          <div className="w-4 h-4 mr-2 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          Starting Generation...
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-4 h-4 mr-2" />
+                          Generate {task?.clips?.length || 0} Video Clips
+                        </>
+                      )}
+                    </Button>
                   </div>
                 </div>
-
-                {transcriptError && (
-                  <Alert className="mb-4 border-red-200 bg-red-50">
-                    <AlertCircle className="h-4 w-4 text-red-500" />
-                    <AlertDescription className="text-sm text-red-700">
-                      {transcriptError}
-                    </AlertDescription>
-                  </Alert>
-                )}
-
-                {isEditingTranscript ? (
-                  <div className="space-y-4">
-                    <textarea
-                      value={editedTranscript}
-                      onChange={(e) => setEditedTranscript(e.target.value)}
-                      className="w-full min-h-[300px] p-4 text-sm font-mono bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent resize-y"
-                      placeholder="Edit the transcript here..."
-                    />
-                    <div className="flex gap-2 justify-end">
-                      <Button
-                        variant="outline"
-                        onClick={() => {
-                          setEditedTranscript(transcript);
-                          setIsEditingTranscript(false);
-                        }}
-                        disabled={isSavingTranscript}
-                      >
-                        <X className="w-4 h-4 mr-2" />
-                        Cancel
-                      </Button>
-                      <Button
-                        onClick={handleSaveTranscript}
-                        disabled={isSavingTranscript}
-                        className="bg-amber-600 hover:bg-amber-700"
-                      >
-                        {isSavingTranscript ? (
-                          <>
-                            <div className="w-4 h-4 mr-2 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                            Saving...
-                          </>
-                        ) : (
-                          <>
-                            <Save className="w-4 h-4 mr-2" />
-                            Save Changes
-                          </>
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="bg-white border border-gray-200 rounded-lg p-4 max-h-[400px] overflow-y-auto">
-                      <pre className="text-sm text-gray-700 whitespace-pre-wrap font-mono">
-                        {transcript || "Loading transcript..."}
-                      </pre>
-                    </div>
-                    <div className="flex gap-2 justify-end">
-                      <Button
-                        variant="outline"
-                        onClick={() => setIsEditingTranscript(true)}
-                        disabled={!transcript}
-                      >
-                        <Edit2 className="w-4 h-4 mr-2" />
-                        Edit Transcript
-                      </Button>
-                      <Button
-                        onClick={handleGenerateClips}
-                        disabled={isGeneratingClips || !transcript}
-                        className="bg-green-600 hover:bg-green-700"
-                      >
-                        {isGeneratingClips ? (
-                          <>
-                            <div className="w-4 h-4 mr-2 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                            Starting...
-                          </>
-                        ) : (
-                          <>
-                            <Play className="w-4 h-4 mr-2" />
-                            Generate Clips
-                          </>
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-                )}
               </CardContent>
             </Card>
 
@@ -1023,6 +1353,30 @@ export default function TaskPage() {
           </Card>
         ) : (
           <div className="grid gap-6">
+            {/* Source Video Player with Clip Sync */}
+            {task?.source_video_url && (
+              <Card className="border-gray-200 overflow-hidden">
+                <CardContent className="p-0">
+                  <div className="p-4 bg-gray-50 border-b border-gray-200">
+                    <h3 className="font-semibold text-black flex items-center gap-2">
+                      <Play className="w-4 h-4" />
+                      Source Video
+                    </h3>
+                    <p className="text-sm text-gray-600">
+                      Click &quot;Play Clip Segment&quot; on any clip below to preview it in the source video
+                    </p>
+                  </div>
+                  <div className="bg-black">
+                    <DynamicVideoPlayer
+                      ref={sourcePlayerRef}
+                      src={task.source_video_url}
+                      className="w-full max-h-[500px]"
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Font Settings Display */}
             {task && (
               <div className="bg-gray-50 rounded-lg p-4">
@@ -1070,7 +1424,7 @@ export default function TaskPage() {
                         <div>
                           <h3 className="font-semibold text-lg text-black mb-1">Clip {clip.clip_order}</h3>
                           <div className="flex items-center gap-2 text-sm text-gray-600">
-                            <span>
+                            <span className="font-mono bg-gray-100 px-2 py-1 rounded">
                               {clip.start_time} - {clip.end_time}
                             </span>
                             <span>•</span>
@@ -1101,7 +1455,27 @@ export default function TaskPage() {
                         </div>
                       )}
 
-                      <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-2">
+                        {sourceVideoUrl && (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => seekToClipStart(clip.start_time)}
+                            >
+                              <Play className="w-4 h-4 mr-2" />
+                              Preview at Start
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => playClipSegment(clip.start_time, clip.end_time)}
+                            >
+                              <Play className="w-4 h-4 mr-2" />
+                              Play Clip Segment
+                            </Button>
+                          </>
+                        )}
                         <Button size="sm" variant="outline" asChild>
                           <a href={`${apiUrl}${clip.video_url}`} download={clip.filename}>
                             <Download className="w-4 h-4 mr-2" />

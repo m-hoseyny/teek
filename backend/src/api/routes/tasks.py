@@ -15,6 +15,7 @@ from ...workers.job_queue import JobQueue
 from ...workers.progress import ProgressTracker
 from ...config import Config
 from ...subtitle_style import normalize_subtitle_style
+from ...video_utils import load_cached_transcript_data, format_ms_to_timestamp
 import redis.asyncio as redis
 
 logger = logging.getLogger(__name__)
@@ -973,6 +974,211 @@ async def delete_clip(task_id: str, clip_id: str, request: Request, db: AsyncSes
         raise HTTPException(status_code=500, detail=f"Error deleting clip: {str(e)}")
 
 
+@router.get("/{task_id}/source-video")
+async def get_task_source_video(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Serve the source video file for review."""
+    # EventSource in browsers cannot set custom headers, so allow query fallback.
+    user_id = request.headers.get("user_id") or request.query_params.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User authentication required")
+
+    try:
+        from pathlib import Path
+        from fastapi.responses import FileResponse
+
+        task_service = TaskService(db)
+        task = await task_service.task_repo.get_task_by_id(db, task_id)
+
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to access this task")
+
+        # Get video path from task metadata
+        metadata = task.get("metadata") or {}
+        video_path = metadata.get("video_path")
+
+        if not video_path:
+            raise HTTPException(status_code=404, detail="Video path not found for this task")
+
+        video_file = Path(video_path)
+        if not video_file.exists():
+            raise HTTPException(status_code=404, detail="Video file not found")
+
+        return FileResponse(
+            path=str(video_file),
+            media_type="video/mp4",
+            headers={
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "public, max-age=3600",
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error serving source video: {e}")
+        raise HTTPException(status_code=500, detail=f"Error serving video: {str(e)}")
+
+
+@router.get("/{task_id}/transcript/segments")
+async def get_task_transcript_segments(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Get the transcript with word-level timestamps/segments for editing."""
+    user_id = request.headers.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User authentication required")
+
+    try:
+        task_service = TaskService(db)
+        task = await task_service.task_repo.get_task_by_id(db, task_id)
+
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to access this task")
+
+        # Get video path from task metadata
+        metadata = task.get("metadata") or {}
+        video_path = metadata.get("video_path")
+
+        if not video_path:
+            raise HTTPException(status_code=404, detail="Video path not found for this task")
+
+        # Load cached transcript data with word timings
+        from pathlib import Path
+        transcript_data = load_cached_transcript_data(Path(video_path))
+
+        if not transcript_data or not transcript_data.get("words"):
+            raise HTTPException(status_code=404, detail="Transcript data not found")
+
+        # Build segments from words (group into sentences/phrases)
+        words = transcript_data["words"]
+        segments = []
+        current_segment_words = []
+        current_start = None
+        segment_word_count = 0
+        max_words_per_segment = 8
+
+        for word in words:
+            word_text = str(word.get("text", "")).strip()
+            if not word_text:
+                continue
+
+            word_start = word.get("start")
+            word_end = word.get("end")
+            if word_start is None or word_end is None:
+                continue
+
+            if current_start is None:
+                current_start = int(word_start)
+
+            current_segment_words.append(word_text)
+            segment_word_count += 1
+
+            # End segment on punctuation or max word count
+            if (
+                segment_word_count >= max_words_per_segment
+                or word_text.endswith(".")
+                or word_text.endswith("!")
+                or word_text.endswith("?")
+            ):
+                segment_text = " ".join(current_segment_words)
+                segments.append({
+                    "id": len(segments),
+                    "start_time": format_ms_to_timestamp(current_start),
+                    "end_time": format_ms_to_timestamp(int(word_end)),
+                    "start_ms": current_start,
+                    "end_ms": int(word_end),
+                    "text": segment_text,
+                    "word_count": segment_word_count
+                })
+                current_segment_words = []
+                current_start = None
+                segment_word_count = 0
+
+        # Add any remaining words as final segment
+        if current_segment_words and current_start is not None:
+            last_word_end = int(words[-1].get("end") or current_start)
+            segment_text = " ".join(current_segment_words)
+            segments.append({
+                "id": len(segments),
+                "start_time": format_ms_to_timestamp(current_start),
+                "end_time": format_ms_to_timestamp(last_word_end),
+                "start_ms": current_start,
+                "end_ms": last_word_end,
+                "text": segment_text,
+                "word_count": segment_word_count
+            })
+
+        return {
+            "task_id": task_id,
+            "segments": segments,
+            "total_segments": len(segments),
+            "total_words": len(words),
+            "status": task.get("status"),
+            "is_editable": task.get("status") in ["awaiting_review", "transcribed"]
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving transcript segments: {e}")
+        raise HTTPException(status_code=500, detail=f"Error retrieving transcript segments: {str(e)}")
+
+
+@router.put("/{task_id}/transcript/segments")
+async def update_task_transcript_segments(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Update transcript segments (with timestamps) for a task."""
+    user_id = request.headers.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User authentication required")
+
+    try:
+        data = await request.json()
+        segments = data.get("segments")
+
+        if segments is None or not isinstance(segments, list):
+            raise HTTPException(status_code=400, detail="segments array is required")
+
+        task_service = TaskService(db)
+        task = await task_service.task_repo.get_task_by_id(db, task_id)
+
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to update this task")
+
+        # Only allow editing if task is in awaiting_review or transcribed status
+        if task.get("status") not in ["awaiting_review", "transcribed", "processing"]:
+            raise HTTPException(status_code=400, detail="Cannot edit transcript at this stage")
+
+        # Rebuild transcript text from segments
+        transcript_lines = []
+        for segment in segments:
+            start_time = segment.get("start_time", "")
+            end_time = segment.get("end_time", "")
+            text = segment.get("text", "").strip()
+            if text:
+                transcript_lines.append(f"[{start_time} - {end_time}] {text}")
+
+        full_transcript = "\n".join(transcript_lines)
+
+        # Update the editable transcript
+        await task_service.task_repo.update_editable_transcript(db, task_id, full_transcript)
+
+        return {
+            "message": "Transcript segments updated successfully",
+            "task_id": task_id,
+            "segment_count": len(segments)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating transcript segments: {e}")
+        raise HTTPException(status_code=500, detail=f"Error updating transcript segments: {str(e)}")
+
+
 @router.get("/{task_id}/transcript")
 async def get_task_transcript(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Get the transcript for a task (for editing before clip generation)."""
@@ -1044,9 +1250,128 @@ async def update_task_transcript(task_id: str, request: Request, db: AsyncSessio
         raise HTTPException(status_code=500, detail=f"Error updating transcript: {str(e)}")
 
 
+@router.put("/{task_id}/clips/{clip_id}/transcript")
+async def update_clip_transcript(
+    task_id: str,
+    clip_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Update the transcript text for a specific clip."""
+    user_id = request.headers.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User authentication required")
+
+    try:
+        data = await request.json()
+        text = data.get("text")
+
+        if text is None:
+            raise HTTPException(status_code=400, detail="text is required")
+
+        task_service = TaskService(db)
+
+        # Verify task exists and user owns it
+        task = await task_service.task_repo.get_task_by_id(db, task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to update this task")
+
+        # Only allow editing if task is in awaiting_review or transcribed status
+        if task.get("status") not in ["awaiting_review", "transcribed"]:
+            raise HTTPException(status_code=400, detail="Cannot edit clip transcripts at this stage")
+
+        # Verify clip exists and belongs to this task
+        clip = await task_service.clip_repo.get_clip_by_id(db, clip_id)
+        if not clip:
+            raise HTTPException(status_code=404, detail="Clip not found")
+        if clip["task_id"] != task_id:
+            raise HTTPException(status_code=404, detail="Clip not found in this task")
+
+        # Update the clip transcript
+        await task_service.clip_repo.update_clip(db, clip_id, {"text": text})
+
+        return {
+            "message": "Clip transcript updated successfully",
+            "task_id": task_id,
+            "clip_id": clip_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating clip transcript: {e}")
+        raise HTTPException(status_code=500, detail=f"Error updating clip transcript: {str(e)}")
+
+
+@router.put("/{task_id}/clips/{clip_id}/time")
+async def update_clip_time(
+    task_id: str,
+    clip_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Update the start/end time for a specific clip."""
+    user_id = request.headers.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User authentication required")
+
+    try:
+        data = await request.json()
+        start_time = data.get("start_time")
+        end_time = data.get("end_time")
+
+        if start_time is None and end_time is None:
+            raise HTTPException(status_code=400, detail="start_time or end_time is required")
+
+        task_service = TaskService(db)
+
+        # Verify task exists and user owns it
+        task = await task_service.task_repo.get_task_by_id(db, task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to update this task")
+
+        # Only allow editing if task is in awaiting_review or transcribed status
+        if task.get("status") not in ["awaiting_review", "transcribed"]:
+            raise HTTPException(status_code=400, detail="Cannot edit clip times at this stage")
+
+        # Verify clip exists and belongs to this task
+        clip = await task_service.clip_repo.get_clip_by_id(db, clip_id)
+        if not clip:
+            raise HTTPException(status_code=404, detail="Clip not found")
+        if clip["task_id"] != task_id:
+            raise HTTPException(status_code=404, detail="Clip not found in this task")
+
+        # Update the clip times
+        updates = {}
+        if start_time is not None:
+            updates["start_time"] = start_time
+        if end_time is not None:
+            updates["end_time"] = end_time
+
+        await task_service.clip_repo.update_clip(db, clip_id, updates)
+
+        return {
+            "message": "Clip time updated successfully",
+            "task_id": task_id,
+            "clip_id": clip_id,
+            "start_time": start_time or clip["start_time"],
+            "end_time": end_time or clip["end_time"]
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating clip time: {e}")
+        raise HTTPException(status_code=500, detail=f"Error updating clip time: {str(e)}")
+
+
 @router.post("/{task_id}/generate-clips")
 async def generate_clips_from_transcript(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
-    """Generate clips from the edited transcript and enqueue for processing."""
+    """Generate video files from reviewed clip records and enqueue for processing."""
     user_id = request.headers.get("user_id")
     if not user_id:
         raise HTTPException(status_code=401, detail="User authentication required")
@@ -1064,36 +1389,30 @@ async def generate_clips_from_transcript(task_id: str, request: Request, db: Asy
         if task.get("status") not in ["awaiting_review", "transcribed"]:
             raise HTTPException(status_code=400, detail="Task is not ready for clip generation")
 
-        # Get the edited transcript
-        transcript = task.get("editable_transcript") or task.get("source_transcript")
-        if not transcript:
-            raise HTTPException(status_code=400, detail="No transcript available for clip generation")
+        # Get the clips to verify they exist
+        clips = await task_service.clip_repo.get_clips_by_task(db, task_id)
+        if not clips:
+            raise HTTPException(status_code=400, detail="No clips found for this task")
 
         # Update task status to processing
         await task_service.task_repo.update_task_status(
-            db, task_id, "processing", progress=50, progress_message="Generating clips from edited transcript..."
+            db, task_id, "processing", progress=50, progress_message="Generating video files from reviewed clips..."
         )
 
-        # Enqueue job for clip generation only
+        # Enqueue job for video generation only
         from ...workers.job_queue import JobQueue
         job_id = await JobQueue.enqueue_job(
             "generate_clips_from_transcript",
             task_id,
-            transcript,
-            task.get("source_id"),
             user_id,
-            task.get("font_family", "TikTokSans-Regular"),
-            task.get("font_size", 24),
-            task.get("font_color", "#FFFFFF"),
-            task.get("transcription_provider", "local"),
-            task.get("ai_provider", "openai"),
             queue_name=config.arq_queue_name,
         )
 
         return {
-            "message": "Clip generation started",
+            "message": "Video generation started",
             "task_id": task_id,
             "job_id": job_id,
+            "clips_count": len(clips),
         }
 
     except HTTPException:

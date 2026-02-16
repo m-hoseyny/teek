@@ -114,6 +114,9 @@ class TaskRepository:
             "font_color": row.font_color,
             "transcription_provider": getattr(row, "transcription_provider", "local"),
             "ai_provider": getattr(row, "ai_provider", "openai"),
+            "metadata": getattr(row, "metadata", None),
+            "source_transcript": getattr(row, "source_transcript", None),
+            "editable_transcript": getattr(row, "editable_transcript", None),
             "created_at": row.created_at,
             "updated_at": row.updated_at
         }
@@ -538,6 +541,21 @@ class TaskRepository:
             {"user_id": user_id}
         )
         return result.fetchone() is not None
+
+    @staticmethod
+    async def update_task_video_path(db: AsyncSession, task_id: str, video_path: str) -> None:
+        """Store the source video path in task metadata for later retrieval."""
+        await db.execute(
+            text("""
+                UPDATE tasks
+                SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_object(ARRAY['video_path', :video_path]),
+                    updated_at = NOW()
+                WHERE id = :task_id
+            """),
+            {"task_id": task_id, "video_path": video_path}
+        )
+        await db.commit()
+        logger.info(f"Stored video path for task {task_id}: {video_path}")
 
     @staticmethod
     async def delete_task(db: AsyncSession, task_id: str) -> None:

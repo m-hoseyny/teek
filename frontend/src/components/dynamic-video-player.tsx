@@ -1,4 +1,12 @@
-import React, { useRef } from "react";
+import React, { useRef, useImperativeHandle, forwardRef } from "react";
+
+export interface VideoPlayerRef {
+  seekTo: (time: number) => void;
+  play: () => void;
+  pause: () => void;
+  getCurrentTime: () => number;
+  getDuration: () => number;
+}
 
 interface DynamicVideoPlayerProps {
   src: string;
@@ -9,17 +17,37 @@ interface DynamicVideoPlayerProps {
   className?: string;
 }
 
-const DynamicVideoPlayer: React.FC<DynamicVideoPlayerProps> = ({
+const DynamicVideoPlayer = forwardRef<VideoPlayerRef, DynamicVideoPlayerProps>(({
   src,
   poster = "/placeholder-video.jpg",
   autoPlay = false,
   muted = false,
   loop = false,
   className = "",
-}) => {
+}, ref) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const [videoDimensions, setVideoDimensions] = React.useState<{ width: number; height: number } | null>(null);
+
+  useImperativeHandle(ref, () => ({
+    seekTo: (time: number) => {
+      if (videoRef.current) {
+        videoRef.current.currentTime = time;
+      }
+    },
+    play: () => {
+      if (videoRef.current) {
+        videoRef.current.play();
+      }
+    },
+    pause: () => {
+      if (videoRef.current) {
+        videoRef.current.pause();
+      }
+    },
+    getCurrentTime: () => videoRef.current?.currentTime ?? 0,
+    getDuration: () => videoRef.current?.duration ?? 0,
+  }));
 
   const handleLoadedMetadata = () => {
     if (videoRef.current) {
@@ -75,6 +103,8 @@ const DynamicVideoPlayer: React.FC<DynamicVideoPlayerProps> = ({
       </video>
     </div>
   );
-};
+});
+
+DynamicVideoPlayer.displayName = "DynamicVideoPlayer";
 
 export default DynamicVideoPlayer;
