@@ -676,6 +676,146 @@ async def generate_clips_from_transcript(
             raise
 
 
+async def retry_clips_analysis(
+    ctx: Dict[str, Any],
+    task_id: str,
+    user_id: str,
+    transcript: str,
+) -> Dict[str, Any]:
+    """
+    Worker task to retry clip generation by re-running AI analysis on existing transcript.
+    This is called when user wants new clips from the same transcript.
+    """
+    from ..database import AsyncSessionLocal
+    from ..config import Config
+    from ..services.task_service import TaskService
+    from ..workers.job_queue import JobQueue
+    from ..workers.progress import ProgressTracker
+
+    logger.info(f"Worker re-analyzing transcript for task {task_id}")
+
+    config = Config()
+    progress = ProgressTracker(ctx['redis'], task_id)
+
+    async with AsyncSessionLocal() as db:
+        task_service = TaskService(db)
+
+        try:
+            async def ensure_not_cancelled() -> None:
+                if await JobQueue.is_task_cancelled(task_id):
+                    raise TaskCancelledError("Cancelled by admin action")
+
+            await ensure_not_cancelled()
+
+            async def update_progress(percent: int, message: str, metadata: Optional[Dict[str, Any]] = None):
+                await ensure_not_cancelled()
+                await progress.update(percent, message, metadata=metadata)
+                logger.info(f"Task {task_id}: {percent}% - {message}")
+                await ensure_not_cancelled()
+
+            # Get task details for AI provider settings
+            task = await task_service.task_repo.get_task_by_id(db, task_id)
+            if not task:
+                raise ValueError(f"Task {task_id} not found")
+
+            ai_provider = task.get("ai_provider", "openai")
+
+            await update_progress(55, "Analyzing transcript with AI for new clips...")
+
+            # Get AI API key
+            ai_key_attempts, _ = await task_service.get_effective_user_ai_api_key_attempts(
+                user_id=user_id,
+                provider=ai_provider,
+                zai_routing_mode=None,
+            )
+            ai_api_key = ai_key_attempts[0]["key"] if ai_key_attempts else None
+
+            # Analyze transcript
+            from ..ai import get_most_relevant_parts_by_transcript
+
+            analysis_result = await get_most_relevant_parts_by_transcript(
+                transcript,
+                ai_provider=ai_provider,
+                ai_api_key=ai_api_key,
+            )
+
+            segments = [
+                {
+                    "start_time": seg.start_time,
+                    "end_time": seg.end_time,
+                    "text": seg.text,
+                    "relevance_score": seg.relevance_score,
+                    "reasoning": seg.reasoning,
+                }
+                for seg in analysis_result.most_relevant_segments
+            ]
+
+            if not segments:
+                await task_service.task_repo.update_task_status(
+                    db, task_id, "completed", progress=100,
+                    progress_message="No clips generated: No valid segments found in transcript"
+                )
+                await progress.complete()
+                return {"task_id": task_id, "clips_created": 0, "message": "No valid segments found"}
+
+            await update_progress(70, f"Creating {len(segments)} new clip records for review...")
+
+            # Create clip records in DB (without video files yet)
+            clip_ids = []
+            for i, seg in enumerate(segments):
+                clip_id = await task_service.clip_repo.create_clip(
+                    db,
+                    task_id=task_id,
+                    filename=f"clip_{i+1:03d}.mp4",  # Placeholder filename
+                    file_path="",  # Empty path - video not generated yet
+                    start_time=seg["start_time"],
+                    end_time=seg["end_time"],
+                    duration=0,  # Will be calculated when video is generated
+                    text=seg["text"],  # This is the transcript the user can edit
+                    relevance_score=seg["relevance_score"],
+                    reasoning=seg["reasoning"],
+                    clip_order=i + 1
+                )
+                clip_ids.append(clip_id)
+
+            # Update task with clip IDs and awaiting_review status
+            await task_service.task_repo.update_task_clips(db, task_id, clip_ids)
+
+            await task_service.task_repo.update_task_status(
+                db, task_id, "awaiting_review", progress=70,
+                progress_message=f"AI found {len(segments)} new clips. Please review and edit the subtitles for each clip, then click 'Generate Clips' to create the videos."
+            )
+            await progress.update(70, f"AI re-analysis complete! Found {len(segments)} new clips. Please review and edit the subtitles, then click 'Generate Clips'.")
+
+            logger.info(f"Task {task_id} ready for review with {len(segments)} new clips after retry")
+
+            return {
+                "task_id": task_id,
+                "status": "awaiting_review",
+                "message": f"AI found {len(segments)} new clips. Waiting for user to review clip subtitles.",
+                "clips_found": len(segments),
+            }
+
+        except TaskCancelledError as e:
+            message = str(e)
+            logger.info(f"Task {task_id} cancelled: {message}")
+            await task_service.task_repo.update_task_status(
+                db, task_id, "error", progress_message=message,
+            )
+            await progress.error(message)
+            return {"task_id": task_id, "cancelled": True, "message": message}
+
+        except Exception as e:
+            logger.error(f"Error re-analyzing transcript for task {task_id}: {e}", exc_info=True)
+            await progress.error(str(e))
+            await task_service.task_repo.update_task_status(
+                db, task_id, "error", progress_message=f"Clip retry failed: {str(e)}",
+            )
+            raise
+        finally:
+            await JobQueue.clear_task_cancelled(task_id)
+
+
 # Worker configuration for arq
 class WorkerSettings:
     """Configuration for arq worker."""
@@ -686,7 +826,7 @@ class WorkerSettings:
     config = Config()
 
     # Functions to run
-    functions = [process_video_task, transcribe_video_task, generate_clips_from_transcript]
+    functions = [process_video_task, transcribe_video_task, generate_clips_from_transcript, retry_clips_analysis]
     # Queue is configurable so dedicated worker containers can consume
     # local vs AssemblyAI jobs independently.
     queue_name = config.arq_queue_name

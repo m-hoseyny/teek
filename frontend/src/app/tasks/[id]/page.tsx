@@ -655,8 +655,38 @@ export default function TaskPage() {
     }
   };
 
-  const handleDeleteClip = async (clipId: string) => {
+  const [isRetrying, setIsRetrying] = useState(false);
 
+  const handleRetryGenerateClips = async () => {
+    if (!session?.user?.id || !taskId) return;
+
+    try {
+      setIsRetrying(true);
+      setTranscriptError(null);
+
+      const response = await fetch(`${apiUrl}/tasks/${taskId}/retry-clips`, {
+        method: "POST",
+        headers: {
+          user_id: session.user.id,
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ } as { detail?: string }));
+        throw new Error(errorData.detail || "Failed to start clip regeneration");
+      }
+
+      // Refresh task status to show processing
+      await fetchTaskStatus();
+    } catch (err) {
+      console.error("Error retrying clip generation:", err);
+      setTranscriptError(err instanceof Error ? err.message : "Failed to start clip regeneration");
+    } finally {
+      setIsRetrying(false);
+    }
+  };
+
+  const handleDeleteClip = async (clipId: string) => {
     try {
       const response = await fetch(`${apiUrl}/tasks/${params.id}/clips/${clipId}`, {
         method: "DELETE",
@@ -1018,123 +1048,126 @@ export default function TaskPage() {
           </Card>
         ) : task?.status === "awaiting_review" || task?.status === "transcribed" ? (
           <div className="space-y-6">
-            {/* Two Column Layout: Video Left, Transcript Right */}
-            <div id="video-transcript-section" className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Left Column: Source Video Player */}
-              {sourceVideoUrl && (
-                <Card className="border-gray-200 overflow-hidden">
-                  <CardContent className="p-0">
-                    <div className="p-4 bg-gray-50 border-b border-gray-200">
-                      <h3 className="font-semibold text-black flex items-center gap-2">
-                        <Play className="w-4 h-4" />
-                        Source Video
-                      </h3>
-                      <p className="text-sm text-gray-600">
-                        Preview clips while editing
-                      </p>
-                    </div>
-                    <div className="bg-black">
-                      <DynamicVideoPlayer
-                        ref={sourcePlayerRef}
-                        src={sourceVideoUrl}
-                        className="w-full max-h-[400px]"
-                      />
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
+            {/* Transcript Review Card */}
+            <Card className="border-amber-200 bg-amber-50/30">
+              <CardContent className="p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
+                    <FileText className="w-5 h-5 text-amber-600" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-semibold text-black">Review Transcript</h2>
+                    <p className="text-sm text-gray-600">
+                      Edit before generating clips
+                    </p>
+                  </div>
+                </div>
 
-              {/* Right Column: Transcript Review */}
-              <Card className="border-amber-200 bg-amber-50/30">
-                <CardContent className="p-6">
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
-                      <FileText className="w-5 h-5 text-amber-600" />
-                    </div>
-                    <div>
-                      <h2 className="text-lg font-semibold text-black">Review Transcript</h2>
-                      <p className="text-sm text-gray-600">
-                        Edit before generating clips
-                      </p>
+                {transcriptError && (
+                  <Alert className="mb-4 border-red-200 bg-red-50">
+                    <AlertCircle className="h-4 w-4 text-red-500" />
+                    <AlertDescription className="text-sm text-red-700">
+                      {transcriptError}
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                {isEditingTranscript ? (
+                  <div className="space-y-4">
+                    <textarea
+                      value={editedTranscript}
+                      onChange={(e) => setEditedTranscript(e.target.value)}
+                      className="w-full min-h-[200px] p-4 text-sm font-mono bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent resize-y"
+                      placeholder="Edit the transcript here..."
+                    />
+                    <div className="flex gap-2 justify-end">
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setEditedTranscript(transcript);
+                          setIsEditingTranscript(false);
+                        }}
+                        disabled={isSavingTranscript}
+                      >
+                        <X className="w-4 h-4 mr-2" />
+                        Cancel
+                      </Button>
+                      <Button
+                        onClick={handleSaveTranscript}
+                        disabled={isSavingTranscript}
+                        className="bg-amber-600 hover:bg-amber-700"
+                      >
+                        {isSavingTranscript ? (
+                          <>
+                            <div className="w-4 h-4 mr-2 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                            Saving...
+                          </>
+                        ) : (
+                          <>
+                            <Save className="w-4 h-4 mr-2" />
+                            Save Changes
+                          </>
+                        )}
+                      </Button>
                     </div>
                   </div>
-
-                  {transcriptError && (
-                    <Alert className="mb-4 border-red-200 bg-red-50">
-                      <AlertCircle className="h-4 w-4 text-red-500" />
-                      <AlertDescription className="text-sm text-red-700">
-                        {transcriptError}
-                      </AlertDescription>
-                    </Alert>
-                  )}
-
-                  {isEditingTranscript ? (
-                    <div className="space-y-4">
-                      <textarea
-                        value={editedTranscript}
-                        onChange={(e) => setEditedTranscript(e.target.value)}
-                        className="w-full min-h-[200px] p-4 text-sm font-mono bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent resize-y"
-                        placeholder="Edit the transcript here..."
-                      />
-                      <div className="flex gap-2 justify-end">
-                        <Button
-                          variant="outline"
-                          onClick={() => {
-                            setEditedTranscript(transcript);
-                            setIsEditingTranscript(false);
-                          }}
-                          disabled={isSavingTranscript}
-                        >
-                          <X className="w-4 h-4 mr-2" />
-                          Cancel
-                        </Button>
-                        <Button
-                          onClick={handleSaveTranscript}
-                          disabled={isSavingTranscript}
-                          className="bg-amber-600 hover:bg-amber-700"
-                        >
-                          {isSavingTranscript ? (
-                            <>
-                              <div className="w-4 h-4 mr-2 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                              Saving...
-                            </>
-                          ) : (
-                            <>
-                              <Save className="w-4 h-4 mr-2" />
-                              Save Changes
-                            </>
-                          )}
-                        </Button>
-                      </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="bg-white border border-gray-200 rounded-lg p-4 max-h-[300px] overflow-y-auto">
+                      <pre className="text-sm text-gray-700 whitespace-pre-wrap font-mono">
+                        {transcript || "Loading transcript..."}
+                      </pre>
                     </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <div className="bg-white border border-gray-200 rounded-lg p-4 max-h-[300px] overflow-y-auto">
-                        <pre className="text-sm text-gray-700 whitespace-pre-wrap font-mono">
-                          {transcript || "Loading transcript..."}
-                        </pre>
-                      </div>
-                      <div className="flex gap-2 justify-end">
-                        <Button
-                          variant="outline"
-                          onClick={() => setIsEditingTranscript(true)}
-                          disabled={!transcript}
-                        >
-                          <Edit2 className="w-4 h-4 mr-2" />
-                          Edit Transcript
-                        </Button>
-                      </div>
+                    <div className="flex gap-2 justify-end">
+                      <Button
+                        variant="outline"
+                        onClick={() => setIsEditingTranscript(true)}
+                        disabled={!transcript}
+                      >
+                        <Edit2 className="w-4 h-4 mr-2" />
+                        Edit Transcript
+                      </Button>
                     </div>
-                  )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Source Video Player */}
+            {sourceVideoUrl && (
+              <Card className="border-gray-200 overflow-hidden">
+                <CardContent className="p-0">
+                  <div className="p-4 bg-gray-50 border-b border-gray-200">
+                    <h3 className="font-semibold text-black flex items-center gap-2">
+                      <Play className="w-4 h-4" />
+                      Source Video
+                    </h3>
+                    <p className="text-sm text-gray-600">
+                      Preview clips while editing
+                    </p>
+                  </div>
+                  <div className="bg-black">
+                    <DynamicVideoPlayer
+                      ref={sourcePlayerRef}
+                      src={sourceVideoUrl}
+                      className="w-full max-h-[400px]"
+                    />
+                  </div>
                 </CardContent>
               </Card>
-            </div>
+            )}
 
             {/* Proposed Clips for Review */}
             {task?.clips && task.clips.length > 0 && (
               <div className="space-y-4" ref={clipsContainerRef}>
                 <h3 className="text-lg font-semibold text-black">Proposed Clips ({task.clips.length})</h3>
-                {task.clips.map((clip, index) => (
+                {[...task.clips]
+                  .sort((a, b) => {
+                    if (editingClipId === a.id) return -1;
+                    if (editingClipId === b.id) return 1;
+                    return 0;
+                  })
+                  .map((clip, index) => (
                   <Card key={clip.id} id={`clip-card-${clip.id}`} className="overflow-hidden border-gray-200">
                     <CardContent className="p-4">
                       <div className="flex items-center justify-between mb-3">
@@ -1178,6 +1211,34 @@ export default function TaskPage() {
                                 placeholder="00:00"
                               />
                             </div>
+                          </div>
+
+                          {/* Preview Buttons */}
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => seekToClipStart(editedClipData.start_time)}
+                            >
+                              <Play className="w-4 h-4 mr-1" />
+                              Preview Start
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => playClipSegment(editedClipData.start_time, editedClipData.end_time)}
+                            >
+                              <Play className="w-4 h-4 mr-1" />
+                              Play Segment
+                            </Button>
+                          </div>
+
+                          {/* Current Transcript (Read-only) */}
+                          <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                            <p className="text-xs text-gray-500 uppercase font-medium mb-1">Transcript</p>
+                            <p className="text-sm text-gray-800">
+                              {clip.text || "No transcript available"}
+                            </p>
                           </div>
 
                           {/* Save/Cancel Buttons */}
@@ -1399,6 +1460,41 @@ export default function TaskPage() {
                 </div>
               </div>
             )}
+            {/* Retry Generate Clips Card */}
+            <Card className="border-blue-200 bg-blue-50/30">
+              <CardContent className="p-6">
+                <div className="flex items-start gap-4">
+                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+                    <Edit2 className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-black mb-1">Not happy with these clips?</h3>
+                    <p className="text-sm text-gray-600 mb-4">
+                      The AI can analyze the transcript again to find different moments. This will delete the current clips and generate new ones for you to review and edit.
+                    </p>
+                    <Button
+                      onClick={handleRetryGenerateClips}
+                      disabled={isRetrying}
+                      variant="outline"
+                      className="border-blue-300 hover:bg-blue-100"
+                    >
+                      {isRetrying ? (
+                        <>
+                          <div className="w-4 h-4 mr-2 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
+                          Re-analyzing...
+                        </>
+                      ) : (
+                        <>
+                          <Edit2 className="w-4 h-4 mr-2" />
+                          Retry Generate Clips
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
             {clips.map((clip) => (
               <Card key={clip.id} className="overflow-hidden">
                 <CardContent className="p-0">

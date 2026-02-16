@@ -1408,6 +1408,69 @@ async def update_clip_time(
         raise HTTPException(status_code=500, detail=f"Error updating clip time: {str(e)}")
 
 
+@router.post("/{task_id}/retry-clips")
+async def retry_clips_generation(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """
+    Retry clip generation for a completed task.
+    Deletes existing clips, re-runs AI analysis on the transcript,
+    and creates new clip records for user review.
+    """
+    user_id = request.headers.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User authentication required")
+
+    try:
+        task_service = TaskService(db)
+        task = await task_service.task_repo.get_task_by_id(db, task_id)
+
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to access this task")
+
+        # Only allow retry from completed status
+        if task.get("status") not in ["completed", "awaiting_review", "transcribed"]:
+            raise HTTPException(status_code=400, detail="Task is not in a state where retry is allowed")
+
+        # Get the editable transcript or source transcript
+        transcript = task.get("editable_transcript") or task.get("source_transcript", "")
+        if not transcript:
+            raise HTTPException(status_code=400, detail="No transcript available for AI analysis")
+
+        # Delete existing clips
+        await task_service.clip_repo.delete_clips_by_task(db, task_id)
+
+        # Clear the clip IDs from the task
+        await task_service.task_repo.update_task_clips(db, task_id, [])
+
+        # Reset task status to processing for the AI analysis phase
+        await task_service.task_repo.update_task_status(
+            db, task_id, "processing", progress=55, progress_message="Re-analyzing transcript with AI for new clips..."
+        )
+
+        # Enqueue job for AI analysis and clip creation (without re-transcribing)
+        from ...workers.job_queue import JobQueue
+        job_id = await JobQueue.enqueue_job(
+            "retry_clips_analysis",
+            task_id,
+            user_id,
+            transcript,
+            queue_name=config.arq_queue_name,
+        )
+
+        return {
+            "message": "Clip regeneration started. The AI will analyze the transcript again to find new clips.",
+            "task_id": task_id,
+            "job_id": job_id,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error starting clip retry: {e}")
+        raise HTTPException(status_code=500, detail=f"Error starting clip retry: {str(e)}")
+
+
 @router.post("/{task_id}/generate-clips")
 async def generate_clips_from_transcript(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Generate video files from reviewed clip records and enqueue for processing."""
