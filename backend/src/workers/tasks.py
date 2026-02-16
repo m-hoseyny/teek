@@ -149,9 +149,11 @@ async def transcribe_video_task(
 
             await update_progress(30, "Video downloaded. Starting transcription...")
 
-            # Transcribe video
+            # Transcribe video or use provided SRT content
             from ..video_utils import get_video_transcript
-
+            
+            srt_content = transcription_options.get("srt_content") if transcription_options else None
+            
             transcript = get_video_transcript(
                 video_path,
                 transcription_provider=transcription_provider,
@@ -159,6 +161,7 @@ async def transcribe_video_task(
                 whisper_chunking_enabled=transcription_options.get("whisper_chunking_enabled") if transcription_options else None,
                 whisper_chunk_duration_seconds=transcription_options.get("whisper_chunk_duration_seconds") if transcription_options else None,
                 whisper_chunk_overlap_seconds=transcription_options.get("whisper_chunk_overlap_seconds") if transcription_options else None,
+                srt_content=srt_content,
             )
 
             if not transcript:

@@ -105,6 +105,10 @@ async def start_task(request: Request):
   font_size = font_options.get("font_size", 24)
   font_color = font_options.get("font_color", "#FFFFFF")
 
+  # Get transcription options (includes SRT content)
+  transcription_options = data.get("transcription_options", {})
+  srt_content = transcription_options.get("srt_content")
+
   logger.info(f"📝 Request data - URL: {raw_source.get('url') if raw_source else 'None'}, User ID: {user_id}")
 
   if not raw_source or not raw_source.get("url"):
@@ -195,7 +199,7 @@ async def start_task(request: Request):
         # Process video (same for both YouTube and uploaded videos)
         if video_path:
             logger.info("🎤 Starting transcript generation with configured transcription provider")
-            transcript = get_video_transcript(video_path)
+            transcript = get_video_transcript(video_path, srt_content=srt_content)
             logger.info(f"✅ Transcript generated with 10-char line equalization (length: {len(transcript)} characters)")
 
             logger.info("🤖 Starting AI analysis for relevant segments")
@@ -342,7 +346,8 @@ async def start_task_with_progress(request: Request):
         await db.commit()
 
         # Start processing in background
-        asyncio.create_task(process_video_task(task.id, raw_source, user_id, font_family, font_size, font_color))
+        transcription_options = data.get("transcription_options", {})
+        asyncio.create_task(process_video_task(task.id, raw_source, user_id, font_family, font_size, font_color, transcription_options))
 
         return {"task_id": task.id, "message": "Task started successfully"}
 
@@ -355,7 +360,7 @@ async def update_task_status(task_id: str, status: str):
         )
         await db.commit()
 
-async def process_video_task(task_id: str, raw_source: dict, user_id: str, font_family: str = "TikTokSans-Regular", font_size: int = 24, font_color: str = "#FFFFFF"):
+async def process_video_task(task_id: str, raw_source: dict, user_id: str, font_family: str = "TikTokSans-Regular", font_size: int = 24, font_color: str = "#FFFFFF", transcription_options: Optional[Dict[str, Any]] = None):
     """Background task to process video and update task status"""
 
     try:
@@ -388,9 +393,10 @@ async def process_video_task(task_id: str, raw_source: dict, user_id: str, font_
                 raise Exception("Uploaded video file not found")
 
         # Process video
+        srt_content = transcription_options.get("srt_content") if transcription_options else None
         if video_path:
             logger.info(f"📊 Task {task_id}: Generating transcript...")
-            transcript = get_video_transcript(video_path)
+            transcript = get_video_transcript(video_path, srt_content=srt_content)
             logger.info(f"✅ Transcript generated (length: {len(transcript)} characters)")
 
             logger.info(f"📊 Task {task_id}: AI analyzing content for best clips...")

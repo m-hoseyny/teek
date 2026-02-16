@@ -30,6 +30,10 @@ from .config import Config
 from .subtitle_style import normalize_subtitle_style
 
 logger = logging.getLogger(__name__)
+handler = logging.StreamHandler()
+handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
 config = Config()
 _whisper_model_cache: Dict[str, Any] = {}
 _whisper_model_lock = threading.Lock()
@@ -72,8 +76,11 @@ class VideoProcessor:
         return settings.get(target_quality, settings["high"])
 
 def _get_transcription_provider(provider_override: Optional[str] = None) -> str:
-    # Force AssemblyAI - local Whisper is disabled
-    return "assemblyai"
+    """Resolve transcription provider. Supports: local, assemblyai, srt."""
+    if provider_override:
+        return provider_override.strip().lower()
+    # Default to local Whisper
+    raise Exception("Transcription provider not specified")
 
 
 def _resolve_whisper_device() -> Tuple[str, bool]:
@@ -609,6 +616,21 @@ def _transcribe_with_assemblyai(video_path: Path, api_key: Optional[str] = None)
     return {"words": words_data, "text": str(getattr(transcript, "text", "") or "").strip()}
 
 
+def _transcribe_with_srt(srt_content: str) -> Dict[str, Any]:
+    """Transcribe using provided SRT content."""
+    if not srt_content or not isinstance(srt_content, str) or not srt_content.strip():
+        raise ValueError("SRT content is required for srt provider")
+    
+    logger.info("Transcribing using provided SRT content")
+    transcript_data = parse_srt_content(srt_content)
+    
+    logger.info(
+        f"SRT transcript parsed: {len(transcript_data['words'])} words, "
+        f"{len(transcript_data['text'])} chars"
+    )
+    return transcript_data
+
+
 def get_video_transcript(
     video_path: Union[Path, str],
     transcription_provider: Optional[str] = None,
@@ -616,8 +638,15 @@ def get_video_transcript(
     whisper_chunking_enabled: Optional[bool] = None,
     whisper_chunk_duration_seconds: Optional[int] = None,
     whisper_chunk_overlap_seconds: Optional[int] = None,
+    srt_content: Optional[str] = None,
 ) -> str:
-    """Get transcript using configured provider with word-level timings."""
+    """Get transcript using configured provider with word-level timings.
+    
+    Providers:
+    - "local": Use local Whisper model
+    - "assemblyai": Use AssemblyAI API
+    - "srt": Parse provided SRT content
+    """
     video_path = Path(video_path)
     logger.info(f"Getting transcript for: {video_path}")
 
@@ -638,7 +667,11 @@ def get_video_transcript(
     logger.info(f"Transcription provider: {provider}")
 
     try:
-        if provider == "assemblyai":
+        if provider == "srt":
+            if not srt_content:
+                raise ValueError("srt_content is required when using 'srt' provider")
+            transcript_data = _transcribe_with_srt(srt_content)
+        elif provider == "assemblyai":
             transcript_data = _transcribe_with_assemblyai(video_path, assembly_api_key)
         else:
             transcript_data = _transcribe_with_local_whisper(
@@ -1723,9 +1756,85 @@ def create_clips_with_transitions(
     return enhanced_clips
 
 # Backward compatibility functions
+def parse_srt_content(srt_content: str) -> Dict[str, Any]:
+    """Parse SRT file content and return transcript data with word timings.
+    
+    Args:
+        srt_content: Raw SRT file content as string
+        
+    Returns:
+        Dict with 'words' list and 'text' string formatted for AI analysis
+    """
+    from datetime import timedelta
+    
+    words_data: List[Dict[str, Any]] = []
+    formatted_lines = []
+    
+    try:
+        # Parse SRT content using the srt library
+        subtitle_generator = srt.parse(srt_content)
+        subtitles = list(subtitle_generator)
+        
+        for subtitle in subtitles:
+            # Get start and end times in milliseconds
+            start_ms = int(subtitle.start.total_seconds() * 1000)
+            end_ms = int(subtitle.end.total_seconds() * 1000)
+            
+            # Clean the text (remove HTML tags, newlines, etc.)
+            text = subtitle.content.replace('\n', ' ').strip()
+            # Remove HTML tags if any
+            import re
+            text = re.sub(r'<[^>]+>', '', text)
+            
+            if not text:
+                continue
+            
+            # Split text into words
+            words = text.split()
+            if not words:
+                continue
+            
+            # Distribute timing across words
+            duration_ms = end_ms - start_ms
+            word_duration = duration_ms // len(words)
+            
+            for i, word in enumerate(words):
+                word_start = start_ms + (i * word_duration)
+                word_end = word_start + word_duration if i < len(words) - 1 else end_ms
+                
+                words_data.append({
+                    "text": word,
+                    "start": word_start,
+                    "end": word_end,
+                    "confidence": 1.0,  # SRT doesn't have confidence scores
+                })
+            
+            # Format for AI analysis: [MM:SS - MM:SS] Text
+            start_time_str = format_ms_to_timestamp(start_ms)
+            end_time_str = format_ms_to_timestamp(end_ms)
+            formatted_lines.append(f"[{start_time_str} - {end_time_str}] {text}")
+        
+        full_text = "\n".join(formatted_lines)
+        
+        logger.info(f"Parsed SRT: {len(subtitles)} subtitles, {len(words_data)} words, {len(full_text)} chars")
+        
+        return {
+            "words": words_data,
+            "text": full_text
+        }
+        
+    except Exception as e:
+        logger.error(f"Error parsing SRT content: {e}")
+        raise ValueError(f"Failed to parse SRT file: {e}")
+
 def get_video_transcript_with_assemblyai(path: Path) -> str:
     """Backward compatibility wrapper for older call sites."""
     return get_video_transcript(path, transcription_provider="assemblyai")
+
+def get_video_transcript_from_srt(srt_content: str) -> str:
+    """Get transcript from SRT content."""
+    result = parse_srt_content(srt_content)
+    return result["text"]
 
 def create_9_16_clip(video_path: Path, start_time: float, end_time: float, output_path: Path, subtitle_text: str = "") -> bool:
     """Backward compatibility wrapper."""

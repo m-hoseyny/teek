@@ -228,10 +228,12 @@ class VideoService:
         whisper_chunking_enabled: Optional[bool] = None,
         whisper_chunk_duration_seconds: Optional[int] = None,
         whisper_chunk_overlap_seconds: Optional[int] = None,
+        srt_content: Optional[str] = None,
     ) -> str:
         """
         Generate transcript from video using configured transcription provider.
         Runs in thread pool to avoid blocking.
+        If srt_content is provided, it will be parsed directly instead of transcription.
         """
         logger.info(f"Generating transcript for: {video_path}")
         transcript = await run_in_thread(
@@ -242,6 +244,7 @@ class VideoService:
             whisper_chunking_enabled,
             whisper_chunk_duration_seconds,
             whisper_chunk_overlap_seconds,
+            srt_content,
         )
         logger.info(f"Transcript generated: {len(transcript)} characters")
         return transcript
@@ -255,11 +258,52 @@ class VideoService:
         whisper_chunking_enabled: Optional[bool] = None,
         whisper_chunk_duration_seconds: Optional[int] = None,
         whisper_chunk_overlap_seconds: Optional[int] = None,
+        srt_content: Optional[str] = None,
     ) -> str:
         """
         Generate transcript and emit heartbeat progress while waiting for transcription.
         This prevents the UI from appearing stuck during long transcription calls.
+        If srt_content is provided, parses it directly without transcription.
         """
+        # If SRT content is provided, parse directly without heartbeat
+        if srt_content and isinstance(srt_content, str) and srt_content.strip():
+            logger.info(f"Using provided SRT content for: {video_path.name}")
+            if progress_callback:
+                await progress_callback(
+                    35,
+                    "Using provided SRT file, parsing...",
+                    {
+                        "stage": "transcript",
+                        "stage_progress": 50,
+                        "overall_progress": 35,
+                        "transcription_provider": "srt_upload",
+                    },
+                )
+            
+            transcript = await VideoService.generate_transcript(
+                video_path,
+                transcription_provider=transcription_provider,
+                assembly_api_key=assembly_api_key,
+                whisper_chunking_enabled=whisper_chunking_enabled,
+                whisper_chunk_duration_seconds=whisper_chunk_duration_seconds,
+                whisper_chunk_overlap_seconds=whisper_chunk_overlap_seconds,
+                srt_content=srt_content,
+            )
+            
+            if progress_callback:
+                await progress_callback(
+                    50,
+                    "SRT file parsed successfully!",
+                    {
+                        "stage": "transcript",
+                        "stage_progress": 100,
+                        "overall_progress": 50,
+                        "transcription_provider": "srt_upload",
+                        "cached": False,
+                    },
+                )
+            return transcript
+
         cached_transcript = await run_in_thread(get_cached_formatted_transcript, str(video_path))
         if cached_transcript:
             logger.info(f"Using cached transcript for: {video_path.name}")
@@ -553,7 +597,7 @@ class VideoService:
                 video_path = VideoService.validate_uploaded_video_path(url)
             await ensure_not_cancelled()
 
-            # Step 2: Generate transcript
+            # Step 2: Generate transcript or use provided SRT content
             if progress_callback:
                 await progress_callback(
                     30,
@@ -566,6 +610,10 @@ class VideoService:
                     }
                 )
 
+            # Check for provided SRT content
+            srt_content = transcription_options.get("srt_content") if transcription_options else None
+            
+            # Perform transcription (or use SRT if provided)
             transcript = await VideoService.generate_transcript_with_progress(
                 video_path,
                 progress_callback=progress_callback,
@@ -586,6 +634,7 @@ class VideoService:
                     if transcription_options
                     else None
                 ),
+                srt_content=srt_content,
             )
             await ensure_not_cancelled()
 
@@ -700,6 +749,7 @@ class VideoService:
             return {
                 "segments": segments_json,
                 "clips": clips_info,
+                "video_path": str(video_path),
                 "summary": relevant_parts.summary if relevant_parts else None,
                 "key_topics": relevant_parts.key_topics if relevant_parts else None,
                 "analysis_diagnostics": relevant_parts.diagnostics if relevant_parts else None,

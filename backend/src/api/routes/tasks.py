@@ -21,7 +21,7 @@ import redis.asyncio as redis
 logger = logging.getLogger(__name__)
 config = Config()
 router = APIRouter(prefix="/tasks", tags=["tasks"])
-SUPPORTED_TRANSCRIPTION_PROVIDERS = {"local", "assemblyai"}
+SUPPORTED_TRANSCRIPTION_PROVIDERS = {"local", "assemblyai", "srt"}
 SUPPORTED_AI_PROVIDERS = {"openai", "google", "anthropic", "zai"}
 SUPPORTED_ZAI_KEY_PROFILES = {"subscription", "metered"}
 SUPPORTED_ZAI_ROUTING_MODES = {"auto", "subscription", "metered"}
@@ -100,6 +100,13 @@ def _resolve_transcription_runtime_options(
     task_timeout_seconds = _resolve_task_timeout_seconds(transcription_options.get("task_timeout_seconds"))
     if task_timeout_seconds is not None:
         options["task_timeout_seconds"] = task_timeout_seconds
+
+    # For SRT provider, pass through the SRT content
+    if provider == "srt":
+        srt_content = transcription_options.get("srt_content")
+        if srt_content and isinstance(srt_content, str):
+            options["srt_content"] = srt_content
+        return options
 
     if provider != "local":
         return options
@@ -537,6 +544,15 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
     transcription_provider = _resolve_transcription_provider(
         transcription_options.get("provider", "local")
     )
+    # Check if custom SRT content is provided
+    srt_content = transcription_options.get("srt_content")
+    if srt_content and isinstance(srt_content, str) and srt_content.strip():
+        # Use SRT provider when SRT content is provided
+        transcription_provider = "srt"
+        transcription_options = {
+            **transcription_options,
+            "srt_content": srt_content,
+        }
     transcription_runtime_options = _resolve_transcription_runtime_options(
         transcription_options,
         transcription_provider,

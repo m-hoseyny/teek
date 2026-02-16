@@ -350,6 +350,12 @@ class TaskService:
                 cancel_check=cancel_check,
             )
 
+            # Store the video path in task metadata for later retrieval
+            if result.get("video_path"):
+                await self.task_repo.update_task_video_path(
+                    self.db, task_id, result["video_path"]
+                )
+
             # Save clips to database
             await self.task_repo.update_task_status(
                 self.db, task_id, "processing", progress=95, progress_message="Saving clips..."

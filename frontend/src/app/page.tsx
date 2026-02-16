@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback, type CSSProperties, type ChangeEvent, type DragEvent } from "react";
+import { useState, useRef, useEffect, useCallback, type CSSProperties, type ChangeEvent, type DragEvent, type FormEvent, type JSX } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
@@ -15,7 +15,7 @@ import { Slider } from "@/components/ui/slider";
 import { useSession } from "@/lib/auth-client";
 import Link from "next/link";
 import Image from "next/image";
-import { ArrowRight, Youtube, CheckCircle, AlertCircle, Loader2, Palette, Type, Paintbrush, Clock, Upload } from "lucide-react";
+import { ArrowRight, Youtube, CheckCircle, AlertCircle, Loader2, Palette, Type, Paintbrush, Clock, Upload, FileText } from "lucide-react";
 import {
   normalizeFontSize,
   normalizeFontStyleOptions,
@@ -157,6 +157,10 @@ export default function Home() {
   const [isUploadingFont, setIsUploadingFont] = useState(false);
   const [fontUploadMessage, setFontUploadMessage] = useState<string | null>(null);
   const [fontUploadError, setFontUploadError] = useState<string | null>(null);
+  const [useCustomSrt, setUseCustomSrt] = useState(false);
+  const [srtFile, setSrtFile] = useState<File | null>(null);
+  const [srtFileName, setSrtFileName] = useState<string | null>(null);
+  const srtInputRef = useRef<HTMLInputElement | null>(null);
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   const [transitionsEnabled, setTransitionsEnabled] = useState(false);
   const [transcriptReviewEnabled, setTranscriptReviewEnabled] = useState(true);
@@ -453,7 +457,19 @@ export default function Home() {
     });
   };
 
-  const handleFontUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSrtFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    if (file && file.name.toLowerCase().endsWith('.srt')) {
+      setSrtFile(file);
+      setSrtFileName(file.name);
+    } else if (file) {
+      setError("Please upload a valid .srt file");
+      if (srtInputRef.current) {
+        srtInputRef.current.value = "";
+      }
+    }
+  };
+  const handleFontUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) {
       return;
@@ -498,7 +514,7 @@ export default function Home() {
 
 
   const getStepIcon = (step: string) => {
-    const iconMap: Record<string, React.ReactElement> = {
+    const iconMap: Record<string, JSX.Element> = {
       validation: <Loader2 className="w-4 h-4 animate-spin text-blue-500" />,
       user_check: <Loader2 className="w-4 h-4 animate-spin text-blue-500" />,
       source_analysis: <Loader2 className="w-4 h-4 animate-spin text-blue-500" />,
@@ -514,7 +530,7 @@ export default function Home() {
     return iconMap[step] || <Loader2 className="w-4 h-4 animate-spin text-gray-500" />;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
 
     if (sourceType === "upload_file" && !fileRef.current) return;
@@ -531,6 +547,7 @@ export default function Home() {
 
     try {
       let videoUrl = url;
+      let srtContent: string | undefined;
 
       // If uploading file, upload it first
       if (sourceType === "upload_file" && fileRef.current) {
@@ -546,6 +563,11 @@ export default function Home() {
         videoUrl = uploadResult.video_path;
       } else if (sourceType === "video_url") {
         videoUrl = uploadUrl.trim();
+      }
+
+      // Read SRT file content if provided
+      if (useCustomSrt && srtFile) {
+        srtContent = await srtFile.text();
       }
 
       const normalizedChunkDuration = normalizeWhisperChunkDurationSecondsOnForm(whisperChunkDurationSeconds);
@@ -591,6 +613,7 @@ export default function Home() {
             whisper_chunk_duration_seconds: normalizedChunkDuration,
             whisper_chunk_overlap_seconds: normalizedChunkOverlap,
             task_timeout_seconds: normalizedTaskTimeoutSeconds,
+            srt_content: srtContent,
           },
           ai_options: {
             provider: aiProvider,
@@ -923,6 +946,80 @@ export default function Home() {
                   <p className="text-xs text-gray-500 mt-1">
                     When enabled, you&apos;ll be able to review and edit the transcript before the AI generates clips.
                   </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Custom SRT Upload Option */}
+            <div className="pt-2">
+              <div className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  id="use-custom-srt"
+                  checked={useCustomSrt}
+                  onChange={(e) => {
+                    setUseCustomSrt(e.target.checked);
+                    if (!e.target.checked) {
+                      setSrtFile(null);
+                      setSrtFileName(null);
+                      if (srtInputRef.current) {
+                        srtInputRef.current.value = "";
+                      }
+                    }
+                  }}
+                  disabled={isLoading}
+                  className="mt-0.5 w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <div className="flex-1">
+                  <label htmlFor="use-custom-srt" className="text-sm font-medium text-black cursor-pointer">
+                    Use my own SRT subtitle file
+                  </label>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Skip AI transcription and use your own subtitle file instead.
+                  </p>
+
+                  {useCustomSrt && (
+                    <div className="mt-3 space-y-2">
+                      <input
+                        id="srt-upload"
+                        type="file"
+                        accept=".srt"
+                        ref={srtInputRef}
+                        onChange={handleSrtFileChange}
+                        disabled={isLoading}
+                        className="hidden"
+                      />
+                      <div
+                        onClick={() => srtInputRef.current?.click()}
+                        className={`relative border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors ${
+                          srtFileName
+                            ? "border-green-500 bg-green-50"
+                            : "border-gray-300 bg-gray-50 hover:border-gray-400 hover:bg-gray-100"
+                        } ${isLoading ? "opacity-50 cursor-not-allowed" : ""}`}
+                      >
+                        {srtFileName ? (
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-center gap-2 text-green-700">
+                              <FileText className="w-4 h-4" />
+                              <span className="font-medium text-sm">{srtFileName}</span>
+                            </div>
+                            <p className="text-xs text-gray-500">
+                              Click to replace
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="space-y-1">
+                            <div className="flex justify-center">
+                              <FileText className="w-5 h-5 text-gray-400" />
+                            </div>
+                            <p className="text-sm text-gray-600">
+                              Click to upload SRT file
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
