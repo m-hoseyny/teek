@@ -163,13 +163,13 @@ export default function TaskPage() {
     });
     // Jump to clip start time in the video player
     seekToClipStart(clip.start_time);
-    // Scroll the editing clip card to top of viewport for better UX
-    if (elementId) {
-      setTimeout(() => {
-        const element = document.getElementById(elementId);
-        element?.scrollIntoView({ behavior: "smooth", block: "start" });
-      }, 100);
-    }
+    // Scroll the video section to top so video is visible while editing
+    setTimeout(() => {
+      const videoSection = document.getElementById('video-transcript-section');
+      if (videoSection) {
+        videoSection.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }, 100);
   };
 
   const handleSaveClip = async (clipId: string) => {
@@ -179,7 +179,7 @@ export default function TaskPage() {
       setIsSavingClip(true);
       setTranscriptError(null);
       
-      // Save time
+      // Save time - backend will automatically extract transcript for the new time range
       const timeResponse = await fetch(`${apiUrl}/tasks/${taskId}/clips/${clipId}/time`, {
         method: "PUT",
         headers: { "Content-Type": "application/json", user_id: userId },
@@ -194,20 +194,21 @@ export default function TaskPage() {
         throw new Error(errorData.detail || "Failed to save clip time");
       }
       
-      // Save transcript
-      const textResponse = await fetch(`${apiUrl}/tasks/${taskId}/clips/${clipId}/transcript`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", user_id: userId },
-        body: JSON.stringify({ text: editedClipData.text }),
+      const result = await timeResponse.json();
+      
+      // Update the task clips with the new data from backend (including auto-extracted transcript)
+      setTask(prevTask => {
+        if (!prevTask || !prevTask.clips) return prevTask;
+        return {
+          ...prevTask,
+          clips: prevTask.clips.map(clip => 
+            clip.id === clipId 
+              ? { ...clip, start_time: result.start_time, end_time: result.end_time, text: result.text }
+              : clip
+          )
+        };
       });
       
-      if (!textResponse.ok) {
-        const errorData = await textResponse.json().catch(() => ({ } as { detail?: string }));
-        throw new Error(errorData.detail || "Failed to save clip transcript");
-      }
-      
-      // Refresh task to get updated clips
-      await fetchTaskStatus();
       setEditingClipId(null);
     } catch (err) {
       console.error("Error saving clip:", err);
@@ -1018,7 +1019,7 @@ export default function TaskPage() {
         ) : task?.status === "awaiting_review" || task?.status === "transcribed" ? (
           <div className="space-y-6">
             {/* Two Column Layout: Video Left, Transcript Right */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div id="video-transcript-section" className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Left Column: Source Video Player */}
               {sourceVideoUrl && (
                 <Card className="border-gray-200 overflow-hidden">
@@ -1178,14 +1179,6 @@ export default function TaskPage() {
                               />
                             </div>
                           </div>
-
-                          {/* Editable Transcript */}
-                          <textarea
-                            value={editedClipData.text}
-                            onChange={(e) => setEditedClipData({ ...editedClipData, text: e.target.value })}
-                            className="w-full min-h-[100px] p-3 text-sm bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 resize-y"
-                            placeholder="Edit the clip transcript..."
-                          />
 
                           {/* Save/Cancel Buttons */}
                           <div className="flex gap-2 justify-end">

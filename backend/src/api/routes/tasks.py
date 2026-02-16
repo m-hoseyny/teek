@@ -1312,7 +1312,7 @@ async def update_clip_time(
     request: Request,
     db: AsyncSession = Depends(get_db)
 ):
-    """Update the start/end time for a specific clip."""
+    """Update the start/end time for a specific clip and auto-extract transcript for the new time range."""
     user_id = request.headers.get("user_id")
     if not user_id:
         raise HTTPException(status_code=401, detail="User authentication required")
@@ -1345,12 +1345,50 @@ async def update_clip_time(
         if clip["task_id"] != task_id:
             raise HTTPException(status_code=404, detail="Clip not found in this task")
 
-        # Update the clip times
-        updates = {}
-        if start_time is not None:
-            updates["start_time"] = start_time
-        if end_time is not None:
-            updates["end_time"] = end_time
+        # Use new times or fall back to existing times
+        new_start_time = start_time if start_time is not None else clip["start_time"]
+        new_end_time = end_time if end_time is not None else clip["end_time"]
+
+        # Get video path from task metadata to load cached transcript data
+        metadata = task.get("metadata") or {}
+        video_path_str = metadata.get("video_path")
+
+        extracted_text = None
+        if video_path_str:
+            from pathlib import Path
+            from ...video_utils import load_cached_transcript_data, parse_timestamp_to_seconds
+
+            video_path = Path(video_path_str)
+            transcript_data = load_cached_transcript_data(video_path)
+
+            if transcript_data and transcript_data.get("words"):
+                # Convert timestamps to milliseconds
+                start_seconds = parse_timestamp_to_seconds(new_start_time)
+                end_seconds = parse_timestamp_to_seconds(new_end_time)
+                clip_start_ms = int(start_seconds * 1000)
+                clip_end_ms = int(end_seconds * 1000)
+
+                # Extract words within the new time range
+                words_in_range = []
+                for word_data in transcript_data["words"]:
+                    word_start = word_data.get("start", 0)
+                    word_end = word_data.get("end", 0)
+
+                    # Include words that overlap with the clip time range
+                    if word_start < clip_end_ms and word_end > clip_start_ms:
+                        words_in_range.append(word_data["text"])
+
+                if words_in_range:
+                    extracted_text = " ".join(words_in_range)
+                    logger.info(f"Auto-extracted {len(words_in_range)} words for clip {clip_id}")
+
+        # Update the clip times and transcript
+        updates = {
+            "start_time": new_start_time,
+            "end_time": new_end_time,
+        }
+        if extracted_text:
+            updates["text"] = extracted_text
 
         await task_service.clip_repo.update_clip(db, clip_id, updates)
 
@@ -1358,8 +1396,9 @@ async def update_clip_time(
             "message": "Clip time updated successfully",
             "task_id": task_id,
             "clip_id": clip_id,
-            "start_time": start_time or clip["start_time"],
-            "end_time": end_time or clip["end_time"]
+            "start_time": new_start_time,
+            "end_time": new_end_time,
+            "text": extracted_text if extracted_text else clip.get("text", "")
         }
 
     except HTTPException:
