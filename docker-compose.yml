@@ -16,10 +16,10 @@ services:
     environment:
       - NODE_ENV=development
       - NEXT_TELEMETRY_DISABLED=1
-      - NEXT_PUBLIC_API_URL=http://${APP_HOST:-localhost}:${BACKEND_HOST_PORT:-8000}
+      - NEXT_PUBLIC_API_URL=https://api.supo.papkorn.app
       - DATABASE_URL=postgresql://supoclip:supoclip_password@postgres:5432/supoclip
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-supoclip_dev_secret_change_in_production}
-      - BETTER_AUTH_URL=http://${APP_HOST:-localhost}:${FRONTEND_HOST_PORT:-3000}
+      - BETTER_AUTH_URL=https://supo.papkorn.app
       - BETTER_AUTH_TRUSTED_ORIGINS=${BETTER_AUTH_TRUSTED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
     depends_on:
       postgres:
@@ -41,8 +41,6 @@ services:
       platforms:
         - linux/amd64  # Force x86_64 for MediaPipe compatibility
     container_name: supoclip-backend
-    platform: linux/amd64
-    gpus: ${DOCKER_GPU_REQUEST:-all}
     command: [".venv/bin/uvicorn", "src.main_refactored:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
       - "${BACKEND_HOST_PORT:-8000}:8000"
@@ -57,7 +55,7 @@ services:
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
       - DATABASE_URL=postgresql+asyncpg://supoclip:supoclip_password@postgres:5432/supoclip
-      - TEMP_DIR=/app/uploads
+      - TEMP_DIR=/app
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - ASSEMBLY_AI_API_KEY=${ASSEMBLY_AI_API_KEY}
@@ -81,8 +79,6 @@ services:
       - ARQ_QUEUE_NAME_LOCAL=${ARQ_QUEUE_NAME_LOCAL:-arq:queue:local}
       - ARQ_QUEUE_NAME_ASSEMBLY=${ARQ_QUEUE_NAME_ASSEMBLY:-arq:queue:assembly}
       - SECRET_ENCRYPTION_KEY=${SECRET_ENCRYPTION_KEY:-}
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
     restart: unless-stopped
     depends_on:
       postgres:
@@ -104,8 +100,6 @@ services:
       platforms:
         - linux/amd64
     container_name: supoclip-worker
-    platform: linux/amd64
-    gpus: ${DOCKER_GPU_REQUEST:-all}
     command: [".venv/bin/arq", "src.workers.tasks.WorkerSettings"]
     volumes:
       - ./backend/src:/app/src
@@ -118,7 +112,7 @@ services:
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
       - DATABASE_URL=postgresql+asyncpg://supoclip:supoclip_password@postgres:5432/supoclip
-      - TEMP_DIR=/app/uploads
+      - TEMP_DIR=/app
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - ASSEMBLY_AI_API_KEY=${ASSEMBLY_AI_API_KEY}
@@ -162,8 +156,6 @@ services:
       platforms:
         - linux/amd64
     container_name: supoclip-worker-2
-    platform: linux/amd64
-    gpus: ${DOCKER_GPU_REQUEST_WORKER2:-all}
     command: [".venv/bin/arq", "src.workers.tasks.WorkerSettings"]
     volumes:
       - ./backend/src:/app/src
@@ -176,7 +168,7 @@ services:
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
       - DATABASE_URL=postgresql+asyncpg://supoclip:supoclip_password@postgres:5432/supoclip
-      - TEMP_DIR=/app/uploads
+      - TEMP_DIR=/app
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - ASSEMBLY_AI_API_KEY=${ASSEMBLY_AI_API_KEY}
@@ -219,8 +211,6 @@ services:
       platforms:
         - linux/amd64
     container_name: supoclip-worker-assembly
-    platform: linux/amd64
-    gpus: ${DOCKER_GPU_REQUEST_WORKER_ASSEMBLY:-all}
     command: [".venv/bin/arq", "src.workers.tasks.WorkerSettings"]
     volumes:
       - ./backend/src:/app/src
@@ -233,7 +223,7 @@ services:
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
       - DATABASE_URL=postgresql+asyncpg://supoclip:supoclip_password@postgres:5432/supoclip
-      - TEMP_DIR=/app/uploads
+      - TEMP_DIR=/app
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - ASSEMBLY_AI_API_KEY=${ASSEMBLY_AI_API_KEY}

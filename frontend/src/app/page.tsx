@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback, type CSSProperties } from "react";
+import { useState, useRef, useEffect, useCallback, type CSSProperties, type ChangeEvent, type DragEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
@@ -15,7 +15,7 @@ import { Slider } from "@/components/ui/slider";
 import { useSession } from "@/lib/auth-client";
 import Link from "next/link";
 import Image from "next/image";
-import { ArrowRight, Youtube, CheckCircle, AlertCircle, Loader2, Palette, Type, Paintbrush, Clock } from "lucide-react";
+import { ArrowRight, Youtube, CheckCircle, AlertCircle, Loader2, Palette, Type, Paintbrush, Clock, Upload } from "lucide-react";
 import {
   normalizeFontSize,
   normalizeFontStyleOptions,
@@ -127,8 +127,10 @@ export default function Home() {
   const [progress, setProgress] = useState(0);
   const [statusMessage, setStatusMessage] = useState("");
   const [currentStep, setCurrentStep] = useState("");
-  const [sourceType, setSourceType] = useState<"youtube" | "upload">("youtube");
+  const [sourceType, setSourceType] = useState<"youtube" | "upload_file" | "video_url">("upload_file");
+  const [uploadUrl, setUploadUrl] = useState("");
   const [fileName, setFileName] = useState<string | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sourceTitle, setSourceTitle] = useState<string | null>(null);
   const youtubeInputRef = useRef<HTMLInputElement | null>(null);
@@ -157,6 +159,7 @@ export default function Home() {
   const [fontUploadError, setFontUploadError] = useState<string | null>(null);
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   const [transitionsEnabled, setTransitionsEnabled] = useState(false);
+  const [transcriptReviewEnabled, setTranscriptReviewEnabled] = useState(true);
   const [transcriptionProvider, setTranscriptionProvider] = useState<"local" | "assemblyai">("local");
   const [whisperChunkingEnabled, setWhisperChunkingEnabled] = useState(DEFAULT_WHISPER_CHUNKING_ENABLED);
   const [whisperChunkDurationSeconds, setWhisperChunkDurationSeconds] = useState(DEFAULT_WHISPER_CHUNK_DURATION_SECONDS);
@@ -364,10 +367,38 @@ export default function Home() {
   // Always treat file input as uncontrolled, and store file in a ref
   const fileRef = useRef<File | null>(null);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] || null;
     fileRef.current = file;
     setFileName(file ? file.name : null);
+  };
+
+  const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+
+    const file = e.dataTransfer.files?.[0] || null;
+    if (file && file.type.startsWith("video/")) {
+      fileRef.current = file;
+      setFileName(file.name);
+    }
+  };
+
+  const handleDropZoneClick = () => {
+    fileInputRef.current?.click();
   };
 
   const uploadVideoWithProgress = (file: File): Promise<{ video_path?: string; message?: string }> => {
@@ -486,7 +517,8 @@ export default function Home() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (sourceType === "upload" && !fileRef.current) return;
+    if (sourceType === "upload_file" && !fileRef.current) return;
+    if (sourceType === "video_url" && !uploadUrl.trim()) return;
     if (sourceType === "youtube" && !url.trim()) return;
     if (!session?.user?.id) return;
 
@@ -501,7 +533,7 @@ export default function Home() {
       let videoUrl = url;
 
       // If uploading file, upload it first
-      if (sourceType === "upload" && fileRef.current) {
+      if (sourceType === "upload_file" && fileRef.current) {
         setCurrentStep("upload");
         setStatusMessage("Uploading video file...");
         setProgress(5);
@@ -512,6 +544,8 @@ export default function Home() {
         setStatusMessage("Upload complete. Starting processing...");
         setProgress(100);
         videoUrl = uploadResult.video_path;
+      } else if (sourceType === "video_url") {
+        videoUrl = uploadUrl.trim();
       }
 
       const normalizedChunkDuration = normalizeWhisperChunkDurationSecondsOnForm(whisperChunkDurationSeconds);
@@ -549,6 +583,7 @@ export default function Home() {
             shadow_offset_x: shadowOffsetX,
             shadow_offset_y: shadowOffsetY,
             transitions_enabled: transitionsEnabled,
+            transcript_review_enabled: transcriptReviewEnabled,
           },
           transcription_options: {
             provider: transcriptionProvider,
@@ -585,6 +620,7 @@ export default function Home() {
       setCurrentStep("");
       setFileName(null);
       fileRef.current = null;
+      setUploadUrl("");
       setUrl("");
       if (youtubeInputRef.current) {
         youtubeInputRef.current.value = "";
@@ -712,75 +748,6 @@ export default function Home() {
       {/* Main Content */}
       <div className="max-w-4xl mx-auto px-4 py-16">
         <div className="max-w-xl mx-auto">
-          {/* Latest Generation Preview */}
-          {latestTask && (
-            <div className="mb-8">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-black">Latest Generation</h2>
-                <Link href="/list">
-                  <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-700">
-                    See All <ArrowRight className="w-4 h-4 ml-1" />
-                  </Button>
-                </Link>
-              </div>
-
-              <Link href={`/tasks/${latestTask.id}`}>
-                <Card className="hover:shadow-md transition-shadow cursor-pointer">
-                  <CardContent className="p-6">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1 min-w-0">
-                        <h3 className="text-lg font-semibold text-black mb-2 truncate">
-                          {latestTask.source_title}
-                        </h3>
-                        <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600">
-                          <Badge variant="outline" className="capitalize">
-                            {latestTask.source_type}
-                          </Badge>
-                          <span className="flex items-center gap-1">
-                            <Clock className="w-4 h-4" />
-                            {new Date(latestTask.created_at).toLocaleDateString()}
-                          </span>
-                          <span>
-                            {latestTask.clips_count} {latestTask.clips_count === 1 ? "clip" : "clips"}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="flex-shrink-0">
-                        {latestTask.status === "completed" ? (
-                          <Badge className="bg-green-100 text-green-800">
-                            <CheckCircle className="w-3 h-3 mr-1" />
-                            Completed
-                          </Badge>
-                        ) : latestTask.status === "processing" ? (
-                          <Badge className="bg-blue-100 text-blue-800">
-                            <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                            Processing
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline">{latestTask.status}</Badge>
-                        )}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </Link>
-
-              <Separator className="my-8" />
-            </div>
-          )}
-
-          {isLoadingLatest && (
-            <div className="mb-8">
-              <Skeleton className="h-5 w-32 mb-4" />
-              <Card>
-                <CardContent className="p-6">
-                  <Skeleton className="h-5 w-64 mb-2" />
-                  <Skeleton className="h-4 w-48" />
-                </CardContent>
-              </Card>
-              <Separator className="my-8" />
-            </div>
-          )}
 
           <div className="mb-8">
             <h2 className="text-2xl font-bold text-black mb-2">
@@ -797,14 +764,25 @@ export default function Home() {
               <label htmlFor="source-type" className="text-sm font-medium text-black">
                 Source Type
               </label>
-              <Select value={sourceType} onValueChange={(value: "youtube" | "upload") => {
+              <Select value={sourceType} onValueChange={(value: "youtube" | "upload_file" | "video_url") => {
                 setSourceType(value);
-                // Reset file input and fileName when switching to YouTube
-                if (value === "youtube") {
+                // Reset file input and fileName when switching away from file upload
+                if (value !== "upload_file") {
                   setFileName(null);
                   fileRef.current = null;
                   if (fileInputRef.current) {
                     fileInputRef.current.value = "";
+                  }
+                }
+                // Reset upload URL when switching away from video URL
+                if (value !== "video_url") {
+                  setUploadUrl("");
+                }
+                // Reset YouTube URL when switching away from youtube
+                if (value !== "youtube") {
+                  setUrl("");
+                  if (youtubeInputRef.current) {
+                    youtubeInputRef.current.value = "";
                   }
                 }
               }} disabled={isLoading}>
@@ -812,16 +790,22 @@ export default function Home() {
                   <SelectValue placeholder="Select source type" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="upload_file">
+                    <div className="flex items-center gap-2">
+                      <ArrowRight className="w-4 h-4" />
+                      Upload File
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="video_url">
+                    <div className="flex items-center gap-2">
+                      <ArrowRight className="w-4 h-4" />
+                      Video URL
+                    </div>
+                  </SelectItem>
                   <SelectItem value="youtube">
                     <div className="flex items-center gap-2">
                       <Youtube className="w-4 h-4" />
                       YouTube URL
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="upload">
-                    <div className="flex items-center gap-2">
-                      <ArrowRight className="w-4 h-4" />
-                      Upload Video
                     </div>
                   </SelectItem>
                 </SelectContent>
@@ -845,28 +829,103 @@ export default function Home() {
                   className="h-11"
                 />
               </div>
-            ) : (
-              <div key="source-upload" className="space-y-2">
-                <label htmlFor="video-upload" className="text-sm font-medium text-black">
-                  Upload Video
+            ) : sourceType === "upload_file" ? (
+              <div key="source-upload-file" className="space-y-2">
+                <label className="text-sm font-medium text-black">
+                  Upload Video File
                 </label>
                 <input
                   id="video-upload"
                   type="file"
-                  data-slot="input"
-                  accept="video/*"
+                  accept="video/*,video/x-matroska,.mkv"
                   ref={fileInputRef}
                   onChange={handleFileChange}
                   disabled={isLoading}
-                  className="file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex h-11 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive"
+                  className="hidden"
                 />
-                {fileName && (
-                  <div className="text-xs text-gray-600 mt-1">
-                    Selected: {fileName}
-                  </div>
-                )}
+                <div
+                  onClick={handleDropZoneClick}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  className={`relative border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+                    isDragOver
+                      ? "border-blue-500 bg-blue-50"
+                      : fileName
+                        ? "border-green-500 bg-green-50"
+                        : "border-gray-300 bg-gray-50 hover:border-gray-400 hover:bg-gray-100"
+                  } ${isLoading ? "opacity-50 cursor-not-allowed" : ""}`}
+                >
+                  {fileName ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-center gap-2 text-green-700">
+                        <CheckCircle className="w-5 h-5" />
+                        <span className="font-medium">{fileName}</span>
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        Click or drag another file to replace
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="flex justify-center">
+                        <div className="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center">
+                          <Upload className="w-6 h-6 text-gray-600" />
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-gray-700">
+                          Drop your video here, or click to browse
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Supports MP4, MOV, MKV, and other video formats
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div key="source-video-url" className="space-y-2">
+                <label htmlFor="video-url" className="text-sm font-medium text-black">
+                  Video URL
+                </label>
+                <Input
+                  id="video-url"
+                  type="url"
+                  placeholder="https://example.com/video.mp4"
+                  value={uploadUrl}
+                  onChange={(e) => setUploadUrl(e.target.value)}
+                  disabled={isLoading}
+                  className="h-11"
+                />
+                <p className="text-xs text-gray-500">
+                  Direct link to video file (MP4, MOV, MKV, etc.)
+                </p>
               </div>
             )}
+
+            {/* Transcript Review Option */}
+            <div className="pt-2">
+              <div className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  id="transcript-review"
+                  checked={transcriptReviewEnabled}
+                  onChange={(e) => setTranscriptReviewEnabled(e.target.checked)}
+                  disabled={isLoading}
+                  className="mt-0.5 w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <div>
+                  <label htmlFor="transcript-review" className="text-sm font-medium text-black cursor-pointer">
+                    Review and edit transcript before generating clips
+                  </label>
+                  <p className="text-xs text-gray-500 mt-1">
+                    When enabled, you&apos;ll be able to review and edit the transcript before the AI generates clips.
+                  </p>
+                </div>
+              </div>
+            </div>
 
             {/* Font Customization Section */}
             <div className="space-y-4 border rounded-lg p-4 bg-gray-50">
@@ -1225,7 +1284,7 @@ export default function Home() {
                   Upload flow should only show upload progress on this page.
                   Pipeline stage progress is shown on the task details page after redirect.
                 */}
-                {sourceType === "upload" && currentStep === "upload" ? (
+                {sourceType === "upload_file" && currentStep === "upload" ? (
                   <div className="space-y-2">
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-600">Upload</span>
@@ -1307,24 +1366,96 @@ export default function Home() {
               className="w-full h-11"
               disabled={
                 (sourceType === "youtube" && !url.trim()) ||
-                (sourceType === "upload" && !fileRef.current) ||
+                (sourceType === "upload_file" && !fileRef.current) ||
+                (sourceType === "video_url" && !uploadUrl.trim()) ||
                 isLoading
               }
             >
               {isLoading ? "Processing..." : "Process Video"}
             </Button>
 
-            {((sourceType === "youtube" && url) || (sourceType === "upload" && fileName)) && !isLoading && (
+            {((sourceType === "youtube" && url) || (sourceType === "upload_file" && fileName) || (sourceType === "video_url" && uploadUrl)) && !isLoading && (
               <Alert className="mt-6">
                 <AlertDescription className="text-sm">
                   Ready to process: {sourceType === "youtube"
                     ? (url.length > 50 ? url.substring(0, 50) + "..." : url)
-                    : fileName
+                    : sourceType === "upload_file"
+                      ? fileName
+                      : (uploadUrl.length > 50 ? uploadUrl.substring(0, 50) + "..." : uploadUrl)
                   }
                 </AlertDescription>
               </Alert>
             )}
           </form>
+
+          {/* Latest Generation Preview */}
+          {latestTask && (
+            <div className="mt-8">
+              <Separator className="my-8" />
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-black">Latest Generation</h2>
+                <Link href="/list">
+                  <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-700">
+                    See All <ArrowRight className="w-4 h-4 ml-1" />
+                  </Button>
+                </Link>
+              </div>
+
+              <Link href={`/tasks/${latestTask.id}`}>
+                <Card className="hover:shadow-md transition-shadow cursor-pointer">
+                  <CardContent className="p-6">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-lg font-semibold text-black mb-2 truncate">
+                          {latestTask.source_title}
+                        </h3>
+                        <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600">
+                          <Badge variant="outline" className="capitalize">
+                            {latestTask.source_type}
+                          </Badge>
+                          <span className="flex items-center gap-1">
+                            <Clock className="w-4 h-4" />
+                            {new Date(latestTask.created_at).toLocaleDateString()}
+                          </span>
+                          <span>
+                            {latestTask.clips_count} {latestTask.clips_count === 1 ? "clip" : "clips"}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex-shrink-0">
+                        {latestTask.status === "completed" ? (
+                          <Badge className="bg-green-100 text-green-800">
+                            <CheckCircle className="w-3 h-3 mr-1" />
+                            Completed
+                          </Badge>
+                        ) : latestTask.status === "processing" ? (
+                          <Badge className="bg-blue-100 text-blue-800">
+                            <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                            Processing
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline">{latestTask.status}</Badge>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </Link>
+            </div>
+          )}
+
+          {isLoadingLatest && (
+            <div className="mt-8">
+              <Separator className="my-8" />
+              <Skeleton className="h-5 w-32 mb-4" />
+              <Card>
+                <CardContent className="p-6">
+                  <Skeleton className="h-5 w-64 mb-2" />
+                  <Skeleton className="h-4 w-48" />
+                </CardContent>
+              </Card>
+            </div>
+          )}
         </div>
       </div>
     </div>

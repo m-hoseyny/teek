@@ -99,6 +99,9 @@ class Task(Base):
     font_color: Mapped[Optional[str]] = mapped_column(String(7), nullable=True, server_default=text("'#FFFFFF'"))  # Hex color code
     transcription_provider: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'local'"))
     ai_provider: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'openai'"))
+    transcript_review_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    editable_transcript: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # User-edited transcript before clip generation
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)  # When transcript was reviewed
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -119,7 +122,7 @@ class Source(Base):
 
     # Add check constraint for type enum
     __table_args__ = (
-        CheckConstraint("type IN ('youtube', 'video_url')", name="check_source_type"),
+        CheckConstraint("type IN ('youtube', 'video_url', 'uploaded_file')", name="check_source_type"),
     )
 
     # Relationships - Source can have multiple tasks

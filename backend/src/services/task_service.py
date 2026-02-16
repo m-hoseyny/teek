@@ -48,6 +48,7 @@ class TaskService:
         font_color: str = "#FFFFFF",
         transcription_provider: str = "local",
         ai_provider: str = "openai",
+        transcript_review_enabled: bool = False,
     ) -> str:
         """
         Create a new task with associated source.
@@ -64,6 +65,13 @@ class TaskService:
         if not title:
             if source_type == "youtube":
                 title = await self.video_service.get_video_title(url)
+            elif source_type == "video_url":
+                # Try to extract filename from URL as title
+                from pathlib import Path
+                from urllib.parse import urlparse
+                parsed = urlparse(url)
+                filename = Path(parsed.path).name
+                title = filename if filename else "Video from URL"
             else:
                 title = "Uploaded Video"
 
@@ -86,6 +94,7 @@ class TaskService:
             font_color=font_color,
             transcription_provider=transcription_provider,
             ai_provider=ai_provider,
+            transcript_review_enabled=transcript_review_enabled,
         )
 
         logger.info(f"Created task {task_id} for user {user_id}")

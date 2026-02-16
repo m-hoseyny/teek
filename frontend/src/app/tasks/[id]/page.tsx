@@ -19,7 +19,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useSession } from "@/lib/auth-client";
-import { ArrowLeft, Download, Clock, Star, AlertCircle, Trash2, Edit2, X, Check } from "lucide-react";
+import { ArrowLeft, Download, Clock, Star, AlertCircle, Trash2, Edit2, X, Check, FileText, Play, Save } from "lucide-react";
 import Link from "next/link";
 import DynamicVideoPlayer from "@/components/dynamic-video-player";
 
@@ -149,12 +149,47 @@ export default function TaskPage() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deletingClipId, setDeletingClipId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isEditingTranscript, setIsEditingTranscript] = useState(false);
+  const [transcript, setTranscript] = useState("");
+  const [editedTranscript, setEditedTranscript] = useState("");
+  const [isSavingTranscript, setIsSavingTranscript] = useState(false);
+  const [isGeneratingClips, setIsGeneratingClips] = useState(false);
+  const [transcriptError, setTranscriptError] = useState<string | null>(null);
   const progressRef = useRef(progress);
   const progressMessageRef = useRef(progressMessage);
   const sourceTypeRef = useRef<string | undefined>(task?.source_type);
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
   const taskId = Array.isArray(params.id) ? params.id[0] : params.id;
   const userId = session?.user?.id;
+
+  // Fetch transcript when task is in awaiting_review status
+  const fetchTranscript = useCallback(async () => {
+    if (!taskId || !userId) return;
+
+    try {
+      const response = await fetch(`${apiUrl}/tasks/${taskId}/transcript`, {
+        headers: { user_id: userId },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch transcript: ${response.status}`);
+      }
+
+      const data = await response.json();
+      setTranscript(data.transcript || "");
+      setEditedTranscript(data.transcript || "");
+    } catch (err) {
+      console.error("Error fetching transcript:", err);
+      setTranscriptError(err instanceof Error ? err.message : "Failed to load transcript");
+    }
+  }, [apiUrl, taskId, userId]);
+
+  // Fetch transcript when task status changes to awaiting_review
+  useEffect(() => {
+    if (task?.status === "awaiting_review" || task?.status === "transcribed") {
+      fetchTranscript();
+    }
+  }, [task?.status, fetchTranscript]);
 
   useEffect(() => {
     progressRef.current = progress;
@@ -400,8 +435,72 @@ export default function TaskPage() {
     }
   };
 
+  const handleSaveTranscript = async () => {
+    if (!session?.user?.id || !taskId) return;
+
+    try {
+      setIsSavingTranscript(true);
+      setTranscriptError(null);
+
+      const response = await fetch(`${apiUrl}/tasks/${taskId}/transcript`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          user_id: session.user.id,
+        },
+        body: JSON.stringify({ transcript: editedTranscript }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ } as { detail?: string }));
+        throw new Error(errorData.detail || "Failed to save transcript");
+      }
+
+      setTranscript(editedTranscript);
+      setIsEditingTranscript(false);
+    } catch (err) {
+      console.error("Error saving transcript:", err);
+      setTranscriptError(err instanceof Error ? err.message : "Failed to save transcript");
+    } finally {
+      setIsSavingTranscript(false);
+    }
+  };
+
+  const handleGenerateClips = async () => {
+    if (!session?.user?.id || !taskId) return;
+
+    try {
+      setIsGeneratingClips(true);
+      setTranscriptError(null);
+
+      // First save the current transcript if it was edited
+      if (editedTranscript !== transcript) {
+        await handleSaveTranscript();
+      }
+
+      const response = await fetch(`${apiUrl}/tasks/${taskId}/generate-clips`, {
+        method: "POST",
+        headers: {
+          user_id: session.user.id,
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ } as { detail?: string }));
+        throw new Error(errorData.detail || "Failed to start clip generation");
+      }
+
+      // Refresh task status to show processing
+      await fetchTaskStatus();
+    } catch (err) {
+      console.error("Error generating clips:", err);
+      setTranscriptError(err instanceof Error ? err.message : "Failed to start clip generation");
+    } finally {
+      setIsGeneratingClips(false);
+    }
+  };
+
   const handleDeleteClip = async (clipId: string) => {
-    if (!session?.user?.id || !params.id) return;
 
     try {
       const response = await fetch(`${apiUrl}/tasks/${params.id}/clips/${clipId}`, {
@@ -622,6 +721,8 @@ export default function TaskPage() {
                   <Badge className="bg-blue-100 text-blue-800">Processing</Badge>
                 ) : task.status === "queued" ? (
                   <Badge className="bg-yellow-100 text-yellow-800">Queued</Badge>
+                ) : task.status === "awaiting_review" || task.status === "transcribed" ? (
+                  <Badge className="bg-amber-100 text-amber-800">Ready for Review</Badge>
                 ) : (
                   <Badge variant="outline" className="capitalize">
                     {task.status}
@@ -760,6 +861,128 @@ export default function TaskPage() {
               </Link>
             </CardContent>
           </Card>
+        ) : task?.status === "awaiting_review" || task?.status === "transcribed" ? (
+          <div className="space-y-6">
+            {/* Transcript Review Card */}
+            <Card className="border-amber-200 bg-amber-50/30">
+              <CardContent className="p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
+                    <FileText className="w-5 h-5 text-amber-600" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-semibold text-black">Review Transcript</h2>
+                    <p className="text-sm text-gray-600">
+                      Edit the transcript before generating clips. Changes will affect the AI analysis.
+                    </p>
+                  </div>
+                </div>
+
+                {transcriptError && (
+                  <Alert className="mb-4 border-red-200 bg-red-50">
+                    <AlertCircle className="h-4 w-4 text-red-500" />
+                    <AlertDescription className="text-sm text-red-700">
+                      {transcriptError}
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                {isEditingTranscript ? (
+                  <div className="space-y-4">
+                    <textarea
+                      value={editedTranscript}
+                      onChange={(e) => setEditedTranscript(e.target.value)}
+                      className="w-full min-h-[300px] p-4 text-sm font-mono bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent resize-y"
+                      placeholder="Edit the transcript here..."
+                    />
+                    <div className="flex gap-2 justify-end">
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setEditedTranscript(transcript);
+                          setIsEditingTranscript(false);
+                        }}
+                        disabled={isSavingTranscript}
+                      >
+                        <X className="w-4 h-4 mr-2" />
+                        Cancel
+                      </Button>
+                      <Button
+                        onClick={handleSaveTranscript}
+                        disabled={isSavingTranscript}
+                        className="bg-amber-600 hover:bg-amber-700"
+                      >
+                        {isSavingTranscript ? (
+                          <>
+                            <div className="w-4 h-4 mr-2 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                            Saving...
+                          </>
+                        ) : (
+                          <>
+                            <Save className="w-4 h-4 mr-2" />
+                            Save Changes
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="bg-white border border-gray-200 rounded-lg p-4 max-h-[400px] overflow-y-auto">
+                      <pre className="text-sm text-gray-700 whitespace-pre-wrap font-mono">
+                        {transcript || "Loading transcript..."}
+                      </pre>
+                    </div>
+                    <div className="flex gap-2 justify-end">
+                      <Button
+                        variant="outline"
+                        onClick={() => setIsEditingTranscript(true)}
+                        disabled={!transcript}
+                      >
+                        <Edit2 className="w-4 h-4 mr-2" />
+                        Edit Transcript
+                      </Button>
+                      <Button
+                        onClick={handleGenerateClips}
+                        disabled={isGeneratingClips || !transcript}
+                        className="bg-green-600 hover:bg-green-700"
+                      >
+                        {isGeneratingClips ? (
+                          <>
+                            <div className="w-4 h-4 mr-2 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                            Starting...
+                          </>
+                        ) : (
+                          <>
+                            <Play className="w-4 h-4 mr-2" />
+                            Generate Clips
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Preview Message */}
+            <Card className="bg-blue-50/30 border-blue-200">
+              <CardContent className="p-6">
+                <div className="flex items-start gap-3">
+                  <div className="w-5 h-5 mt-0.5 text-blue-500">
+                    <AlertCircle className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-medium text-black mb-1">What happens next?</h3>
+                    <p className="text-sm text-gray-600">
+                      After you click &quot;Generate Clips&quot;, the AI will analyze the transcript to find the most engaging moments,
+                      then create short video clips with subtitles. This usually takes 1-2 minutes.
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         ) : clips.length === 0 ? (
           <Card>
             <CardContent className="p-8 text-center">

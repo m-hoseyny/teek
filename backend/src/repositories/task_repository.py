@@ -32,6 +32,7 @@ class TaskRepository:
         font_color: str = "#FFFFFF",
         transcription_provider: str = "local",
         ai_provider: str = "openai",
+        transcript_review_enabled: bool = False,
     ) -> str:
         """Create a new task and return its ID."""
         result = await db.execute(
@@ -45,6 +46,7 @@ class TaskRepository:
                     font_color,
                     transcription_provider,
                     ai_provider,
+                    transcript_review_enabled,
                     created_at,
                     updated_at
                 )
@@ -57,6 +59,7 @@ class TaskRepository:
                     :font_color,
                     :transcription_provider,
                     :ai_provider,
+                    :transcript_review_enabled,
                     NOW(),
                     NOW()
                 )
@@ -71,6 +74,7 @@ class TaskRepository:
                 "font_color": font_color,
                 "transcription_provider": transcription_provider,
                 "ai_provider": ai_provider,
+                "transcript_review_enabled": transcript_review_enabled,
             }
         )
         await db.commit()
@@ -147,6 +151,22 @@ class TaskRepository:
         await db.commit()
         logger.info(f"Updated task {task_id} status to {status}" +
                    (f" (progress: {progress}%)" if progress else ""))
+
+    @staticmethod
+    async def update_editable_transcript(db: AsyncSession, task_id: str, transcript: str) -> None:
+        """Update the editable transcript for a task."""
+        await db.execute(
+            text("""
+                UPDATE tasks
+                SET editable_transcript = :transcript,
+                    reviewed_at = NOW(),
+                    updated_at = NOW()
+                WHERE id = :task_id
+            """),
+            {"task_id": task_id, "transcript": transcript}
+        )
+        await db.commit()
+        logger.info(f"Updated editable transcript for task {task_id}")
 
     @staticmethod
     async def update_task_clips(db: AsyncSession, task_id: str, clip_ids: List[str]) -> None:

@@ -5,6 +5,7 @@ import json
 import logging
 from typing import Optional, Dict, Any
 from redis.asyncio import Redis
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 logger = logging.getLogger(__name__)
 
@@ -84,5 +85,9 @@ class ProgressTracker:
                     data = json.loads(message["data"])
                     yield data
         finally:
-            await pubsub.unsubscribe(f"progress:{task_id}")
-            await pubsub.close()
+            try:
+                await pubsub.unsubscribe(f"progress:{task_id}")
+                await pubsub.close()
+            except (ConnectionError, ConnectionResetError, RedisConnectionError):
+                # Connection already lost, ignore cleanup errors
+                pass

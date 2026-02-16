@@ -529,6 +529,7 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
     font_size = subtitle_style["font_size"]
     font_color = subtitle_style["font_color"]
     transitions_enabled = _coerce_bool(font_options.get("transitions_enabled"), default=False)
+    transcript_review_enabled = _coerce_bool(font_options.get("transcript_review_enabled"), default=False)
     transcription_options = data.get("transcription_options", {})
     if not isinstance(transcription_options, dict):
         transcription_options = {}
@@ -596,6 +597,7 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
             font_color=font_color,
             transcription_provider=transcription_provider,
             ai_provider=ai_provider,
+            transcript_review_enabled=transcript_review_enabled,
         )
 
         # Get source type for worker
@@ -609,24 +611,48 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
 
         # Enqueue job for worker
         try:
-            job_id = await JobQueue.enqueue_job(
-                "process_video_task",
-                task_id,
-                raw_source["url"],
-                source_type,
-                user_id,
-                font_family,
-                font_size,
-                font_color,
-                transitions_enabled,
-                transcription_provider,
-                ai_provider,
-                ai_model,
-                subtitle_style,
-                resolved_zai_routing_mode,
-                transcription_runtime_options,
-                queue_name=queue_name,
-            )
+            # Choose the appropriate worker based on transcript review setting
+            if transcript_review_enabled:
+                # Use transcribe_video_task which will pause after transcription
+                job_id = await JobQueue.enqueue_job(
+                    "transcribe_video_task",
+                    task_id,
+                    raw_source["url"],
+                    source_type,
+                    user_id,
+                    font_family,
+                    font_size,
+                    font_color,
+                    transitions_enabled,
+                    transcription_provider,
+                    ai_provider,
+                    ai_model,
+                    subtitle_style,
+                    resolved_zai_routing_mode,
+                    transcription_runtime_options,
+                    transcript_review_enabled,  # Pass the flag
+                    queue_name=queue_name,
+                )
+            else:
+                # Use process_video_task for full processing without review
+                job_id = await JobQueue.enqueue_job(
+                    "process_video_task",
+                    task_id,
+                    raw_source["url"],
+                    source_type,
+                    user_id,
+                    font_family,
+                    font_size,
+                    font_color,
+                    transitions_enabled,
+                    transcription_provider,
+                    ai_provider,
+                    ai_model,
+                    subtitle_style,
+                    resolved_zai_routing_mode,
+                    transcription_runtime_options,
+                    queue_name=queue_name,
+                )
         except Exception as enqueue_error:
             logger.error(f"Failed to enqueue job for task {task_id}: {enqueue_error}")
             await task_service.task_repo.update_task_status(
@@ -945,3 +971,133 @@ async def delete_clip(task_id: str, clip_id: str, request: Request, db: AsyncSes
     except Exception as e:
         logger.error(f"Error deleting clip: {e}")
         raise HTTPException(status_code=500, detail=f"Error deleting clip: {str(e)}")
+
+
+@router.get("/{task_id}/transcript")
+async def get_task_transcript(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Get the transcript for a task (for editing before clip generation)."""
+    user_id = request.headers.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User authentication required")
+
+    try:
+        task_service = TaskService(db)
+        task = await task_service.task_repo.get_task_by_id(db, task_id)
+
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to access this task")
+
+        # Return the editable transcript if available, otherwise return the source transcript
+        editable_transcript = task.get("editable_transcript")
+
+        return {
+            "task_id": task_id,
+            "transcript": editable_transcript or task.get("source_transcript", ""),
+            "status": task.get("status"),
+            "is_editable": task.get("status") in ["awaiting_review", "transcribed"]
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving transcript: {e}")
+        raise HTTPException(status_code=500, detail=f"Error retrieving transcript: {str(e)}")
+
+
+@router.put("/{task_id}/transcript")
+async def update_task_transcript(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Update the edited transcript for a task."""
+    user_id = request.headers.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User authentication required")
+
+    try:
+        data = await request.json()
+        transcript = data.get("transcript")
+
+        if transcript is None:
+            raise HTTPException(status_code=400, detail="transcript is required")
+
+        task_service = TaskService(db)
+        task = await task_service.task_repo.get_task_by_id(db, task_id)
+
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to update this task")
+
+        # Only allow editing if task is in awaiting_review or transcribed status
+        if task.get("status") not in ["awaiting_review", "transcribed", "processing"]:
+            raise HTTPException(status_code=400, detail="Cannot edit transcript at this stage")
+
+        # Update the editable transcript
+        await task_service.task_repo.update_editable_transcript(db, task_id, transcript)
+
+        return {"message": "Transcript updated successfully", "task_id": task_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating transcript: {e}")
+        raise HTTPException(status_code=500, detail=f"Error updating transcript: {str(e)}")
+
+
+@router.post("/{task_id}/generate-clips")
+async def generate_clips_from_transcript(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Generate clips from the edited transcript and enqueue for processing."""
+    user_id = request.headers.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User authentication required")
+
+    try:
+        task_service = TaskService(db)
+        task = await task_service.task_repo.get_task_by_id(db, task_id)
+
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to access this task")
+
+        # Only allow clip generation from specific statuses
+        if task.get("status") not in ["awaiting_review", "transcribed"]:
+            raise HTTPException(status_code=400, detail="Task is not ready for clip generation")
+
+        # Get the edited transcript
+        transcript = task.get("editable_transcript") or task.get("source_transcript")
+        if not transcript:
+            raise HTTPException(status_code=400, detail="No transcript available for clip generation")
+
+        # Update task status to processing
+        await task_service.task_repo.update_task_status(
+            db, task_id, "processing", progress=50, progress_message="Generating clips from edited transcript..."
+        )
+
+        # Enqueue job for clip generation only
+        from ...workers.job_queue import JobQueue
+        job_id = await JobQueue.enqueue_job(
+            "generate_clips_from_transcript",
+            task_id,
+            transcript,
+            task.get("source_id"),
+            user_id,
+            task.get("font_family", "TikTokSans-Regular"),
+            task.get("font_size", 24),
+            task.get("font_color", "#FFFFFF"),
+            task.get("transcription_provider", "local"),
+            task.get("ai_provider", "openai"),
+            queue_name=config.arq_queue_name,
+        )
+
+        return {
+            "message": "Clip generation started",
+            "task_id": task_id,
+            "job_id": job_id,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error starting clip generation: {e}")
+        raise HTTPException(status_code=500, detail=f"Error starting clip generation: {str(e)}")

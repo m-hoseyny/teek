@@ -43,6 +43,132 @@ class VideoService:
         return any(marker in normalized for marker in retry_markers)
 
     @staticmethod
+    async def download_video_from_url(url: str, progress_callback: Optional[callable] = None) -> Optional[Path]:
+        """
+        Download a video from a generic URL (non-YouTube).
+        Returns the path to the downloaded file.
+        """
+        import urllib.request
+        import urllib.parse
+        from pathlib import Path
+
+        logger.info(f"Starting download from URL: {url}")
+
+        try:
+            # Parse URL to get filename
+            parsed = urllib.parse.urlparse(url)
+            filename = Path(parsed.path).name or "video"
+
+            # Ensure filename has an extension
+            if not Path(filename).suffix:
+                filename = f"{filename}.mp4"
+
+            # Create downloads directory
+            downloads_dir = Path(config.temp_dir) / "downloads"
+            downloads_dir.mkdir(parents=True, exist_ok=True)
+
+            # Generate unique filename to avoid collisions
+            import hashlib
+            url_hash = hashlib.sha256(url.encode()).hexdigest()[:12]
+            unique_filename = f"{url_hash}_{filename}"
+            destination = downloads_dir / unique_filename
+
+            # Check if already downloaded
+            if destination.exists():
+                logger.info(f"Video already downloaded: {destination}")
+                if progress_callback:
+                    await progress_callback(
+                        10,
+                        "Found existing download, skipping download.",
+                        {
+                            "stage": "download",
+                            "stage_progress": 100,
+                            "overall_progress": 10,
+                            "cached": True,
+                        },
+                    )
+                return destination
+
+            if progress_callback:
+                await progress_callback(
+                    10,
+                    "Downloading video from URL...",
+                    {"stage": "download", "stage_progress": 0, "overall_progress": 10},
+                )
+
+            # Download with progress tracking
+            temp_path = destination.with_suffix(destination.suffix + ".download")
+
+            # Capture event loop before entering thread
+            loop = asyncio.get_running_loop()
+
+            def download_with_progress():
+                request = urllib.request.Request(
+                    url,
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                    },
+                )
+
+                with urllib.request.urlopen(request, timeout=120) as response:
+                    total_size = response.headers.get("Content-Length")
+                    total_size = int(total_size) if total_size else None
+
+                    downloaded = 0
+                    chunk_size = 1024 * 1024  # 1MB chunks
+
+                    with temp_path.open("wb") as f:
+                        while True:
+                            chunk = response.read(chunk_size)
+                            if not chunk:
+                                break
+                            f.write(chunk)
+                            downloaded += len(chunk)
+
+                            # Report progress
+                            if total_size and progress_callback:
+                                percent = int((downloaded / total_size) * 100)
+                                # Map to 10-30% overall progress
+                                overall = 10 + int((percent / 100) * 20)
+                                asyncio.run_coroutine_threadsafe(
+                                    progress_callback(
+                                        overall,
+                                        f"Downloading... {percent}%",
+                                        {
+                                            "stage": "download",
+                                            "stage_progress": percent,
+                                            "overall_progress": overall,
+                                        },
+                                    ),
+                                    loop,
+                                )
+
+            # Run download in thread pool
+            await run_in_thread(download_with_progress)
+
+            # Move temp file to final destination
+            import os
+            os.replace(temp_path, destination)
+
+            logger.info(f"Video downloaded successfully: {destination}")
+
+            if progress_callback:
+                await progress_callback(
+                    30,
+                    "Download complete",
+                    {"stage": "download", "stage_progress": 100, "overall_progress": 30},
+                )
+
+            return destination
+
+        except Exception as e:
+            logger.error(f"Failed to download video from URL: {e}")
+            # Clean up temp file if it exists
+            if "temp_path" in locals() and temp_path.exists():
+                temp_path.unlink()
+            return None
+
+    @staticmethod
     async def download_video(url: str, progress_callback: Optional[callable] = None) -> Optional[Path]:
         """
         Download a YouTube video asynchronously.
@@ -332,9 +458,24 @@ class VideoService:
 
     @staticmethod
     def determine_source_type(url: str) -> str:
-        """Determine if source is YouTube or uploaded file."""
+        """Determine if source is YouTube, uploaded file, or remote video URL."""
+        from ..youtube_utils import get_youtube_video_id
+
+        # Check if it's a YouTube URL
         video_id = get_youtube_video_id(url)
-        return "youtube" if video_id else "video_url"
+        if video_id:
+            return "youtube"
+
+        # Check if it's a local file path (uploaded video)
+        if url.startswith("/") or url.startswith("./") or url.startswith("../"):
+            return "uploaded_file"
+
+        # Check if it's a Windows-style path
+        if len(url) >= 2 and url[1] == ":" and url[0].isalpha():
+            return "uploaded_file"
+
+        # Otherwise treat as remote video URL that needs downloading
+        return "video_url"
 
     @staticmethod
     def validate_uploaded_video_path(url: str) -> Path:
@@ -403,8 +544,12 @@ class VideoService:
             if source_type == "youtube":
                 video_path = await VideoService.download_video(url, progress_callback=progress_callback)
                 if not video_path:
-                    raise Exception("Failed to download video")
-            else:
+                    raise Exception("Failed to download YouTube video")
+            elif source_type == "video_url":
+                video_path = await VideoService.download_video_from_url(url, progress_callback=progress_callback)
+                if not video_path:
+                    raise Exception("Failed to download video from URL")
+            else:  # uploaded_file
                 video_path = VideoService.validate_uploaded_video_path(url)
             await ensure_not_cancelled()
 
