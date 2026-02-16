@@ -90,6 +90,18 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+function isLightColor(hex: string): boolean {
+  const sanitized = hex.replace("#", "");
+  if (sanitized.length !== 6) {
+    return false;
+  }
+  const r = Number.parseInt(sanitized.slice(0, 2), 16);
+  const g = Number.parseInt(sanitized.slice(2, 4), 16);
+  const b = Number.parseInt(sanitized.slice(4, 6), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.5;
+}
+
 function formatTextOption(option: string): string {
   return option.charAt(0).toUpperCase() + option.slice(1);
 }
@@ -1374,10 +1386,32 @@ export default function Home() {
                     </div>
                   </div>
 
-                  <div className="mt-4 p-3 bg-black rounded-lg">
+                  <div className="mt-4 p-3 rounded-lg bg-gray-100 border border-gray-300" style={{ backgroundImage: "linear-gradient(45deg, #ccc 25%, transparent 25%), linear-gradient(-45deg, #ccc 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #ccc 75%), linear-gradient(-45deg, transparent 75%, #ccc 75%)", backgroundSize: "20px 20px", backgroundPosition: "0 0, 0 10px, 10px -10px, -10px 0px" }}>
                     <p style={previewTextStyle} className="w-full">
                       Preview: {applyTextTransform("Your subtitle will look like this", textTransform)}
                     </p>
+                  </div>
+
+                  {/* Transitions Toggle */}
+                  <div className="pt-4 border-t border-gray-200">
+                    <div className="flex items-start gap-3">
+                      <input
+                        type="checkbox"
+                        id="transitions-enabled"
+                        checked={transitionsEnabled}
+                        onChange={(e) => setTransitionsEnabled(e.target.checked)}
+                        disabled={isLoading}
+                        className="mt-0.5 w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <div>
+                        <label htmlFor="transitions-enabled" className="text-sm font-medium text-black cursor-pointer">
+                          Enable transitions between clips
+                        </label>
+                        <p className="text-xs text-gray-500 mt-1">
+                          When enabled, clips will have smooth transitions applied between them during final video assembly.
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}

@@ -72,6 +72,19 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+function isLightColor(hex: string): boolean {
+  const sanitized = hex.replace("#", "");
+  if (sanitized.length !== 6) {
+    return false;
+  }
+  const r = Number.parseInt(sanitized.slice(0, 2), 16);
+  const g = Number.parseInt(sanitized.slice(2, 4), 16);
+  const b = Number.parseInt(sanitized.slice(4, 6), 16);
+  // Calculate relative luminance using the formula for perceived brightness
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.5;
+}
+
 function formatTextOption(option: string): string {
   return option.charAt(0).toUpperCase() + option.slice(1);
 }
@@ -460,7 +473,7 @@ export function SettingsSectionFont({
 
       <div className="space-y-2">
         <Label className="text-sm font-medium text-black">Preview</Label>
-        <div className="p-6 bg-black rounded-lg min-h-[120px] flex items-center">
+        <div className="p-6 rounded-lg min-h-[120px] flex items-center bg-gray-100 border border-gray-300" style={{ backgroundImage: "linear-gradient(45deg, #ccc 25%, transparent 25%), linear-gradient(-45deg, #ccc 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #ccc 75%), linear-gradient(-45deg, transparent 75%, #ccc 75%)", backgroundSize: "20px 20px", backgroundPosition: "0 0, 0 10px, 10px -10px, -10px 0px" }}>
           <p style={previewStyle} className="w-full">
             {applyTextTransform(PREVIEW_TEXT, textTransform)}
           </p>
