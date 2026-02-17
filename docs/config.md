@@ -104,3 +104,16 @@ When adding/changing a variable:
 2. Update root env template (`.env.sample` in this repo; `.env.example` if present) and `backend/.env.example`.
 3. Update this file.
 4. Update references in `QUICKSTART.md` and `CLAUDE.md` if user-visible.
+
+## Subscription Plans
+
+Plans are configured in `backend/src/config.py` and stored in the `users.plan` column.
+
+| Plan | Monthly Price | Transcription | Clip Generations | Features |
+|---|---|---|---|---|
+| `free` | $0 | 0 min | 0 | Watermark, no custom font/size |
+| `starter` | $5 | 600 min (10 hrs) | 50 | No watermark, custom font/size |
+| `pro` | $15 | 3000 min (50 hrs) | 150 | No watermark, custom font/size |
+| `business` | Contact us | Unlimited | Unlimited | No watermark, custom font/size |
+
+Plan limits reset monthly based on the subscription period. Usage is tracked in the `usage_tracking` table.

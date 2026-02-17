@@ -10,6 +10,7 @@ import logging
 
 from ...database import get_db
 from ...services.task_service import TaskService
+from ...services.subscription_service import SubscriptionService, UsageError
 from ...services.ai_model_catalog_service import ModelCatalogError
 from ...repositories.prompt_repository import PromptRepository
 from ...workers.job_queue import JobQueue
@@ -517,6 +518,21 @@ async def list_ai_provider_models(
         raise HTTPException(status_code=500, detail=f"Error listing models: {str(e)}")
 
 
+@router.get("/subscription/usage")
+async def get_usage_summary(request: Request, db: AsyncSession = Depends(get_db)):
+    """Get user's current subscription plan and usage for this month."""
+    user_id = _require_user_id(request)
+    try:
+        subscription_service = SubscriptionService(db)
+        summary = await subscription_service.get_usage_summary(user_id)
+        return summary
+    except UsageError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error retrieving usage summary: {e}")
+        raise HTTPException(status_code=500, detail=f"Error retrieving usage: {str(e)}")
+
+
 @router.get("/prompts")
 async def list_prompts(request: Request):
     """Get all available prompt templates for clip generation."""
@@ -642,6 +658,20 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
 
     try:
         task_service = TaskService(db)
+
+        # Check usage limits before creating task
+        subscription_service = SubscriptionService(db)
+        try:
+            usage_check = await subscription_service.check_can_process_video(
+                user_id=user_id,
+                estimated_duration_minutes=None,  # Will check after download in worker
+                clip_count=clips_count or 5,  # Estimate or default
+                will_transcribe=transcription_provider != "srt" or not srt_content,
+            )
+            if not usage_check["can_process"]:
+                raise HTTPException(status_code=402, detail=usage_check["reason"])
+        except UsageError as e:
+            raise HTTPException(status_code=402, detail=str(e))
 
         # Create task
         if transcription_provider == "assemblyai":

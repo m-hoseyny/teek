@@ -60,3 +60,44 @@ class Config:
         self.mediapipe_face_model_auto_download = (
             os.getenv("MEDIAPIPE_FACE_MODEL_AUTO_DOWNLOAD", "true") or "true"
         ).strip().lower() in {"1", "true", "yes", "on"}
+
+        # Subscription plans configuration
+        # Minutes are stored as integers (e.g., 600 = 10 hours)
+        self.plans = {
+            "free": {
+                "name": "Free",
+                "price_monthly": 0,
+                "transcription_minutes": 0,
+                "clip_generations": 0,
+                "watermark": True,
+                "custom_font": False,
+                "custom_size": False,
+            },
+            "starter": {
+                "name": "Starter",
+                "price_monthly": 5,
+                "transcription_minutes": 600,  # 10 hours
+                "clip_generations": 50,
+                "watermark": False,
+                "custom_font": True,
+                "custom_size": True,
+            },
+            "pro": {
+                "name": "Pro",
+                "price_monthly": 15,
+                "transcription_minutes": 3000,  # 50 hours
+                "clip_generations": 150,
+                "watermark": False,
+                "custom_font": True,
+                "custom_size": True,
+            },
+            "business": {
+                "name": "Business",
+                "price_monthly": None,  # Contact us
+                "transcription_minutes": None,  # Unlimited
+                "clip_generations": None,  # Unlimited
+                "watermark": False,
+                "custom_font": True,
+                "custom_size": True,
+            },
+        }

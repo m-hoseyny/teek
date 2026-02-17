@@ -15,6 +15,51 @@ logger = logging.getLogger(__name__)
 MIGRATIONS_DIR = Path(__file__).parent.parent / "migrations"
 
 
+def split_sql_statements(sql_content: str) -> list:
+    """
+    Split SQL content into individual statements.
+    Handles PL/pgSQL DO blocks properly.
+    """
+    statements = []
+    current = []
+    in_dollar_block = False
+    dollar_tag = None
+    
+    lines = sql_content.split('\n')
+    
+    for line in lines:
+        stripped = line.strip()
+        
+        # Check for dollar-quoted block start (e.g., $$ or $tag$)
+        if not in_dollar_block:
+            dollar_match = re.search(r'(\$\w*\$)', stripped)
+            if dollar_match and '$$' in stripped:
+                in_dollar_block = True
+                dollar_tag = dollar_match.group(1)
+        else:
+            # Check for dollar-quoted block end
+            if dollar_tag and dollar_tag in stripped:
+                in_dollar_block = False
+                dollar_tag = None
+        
+        current.append(line)
+        
+        # End of statement if semicolon at end and not in dollar block
+        if not in_dollar_block and stripped.endswith(';'):
+            stmt = '\n'.join(current).strip()
+            if stmt:
+                statements.append(stmt)
+            current = []
+    
+    # Add any remaining content
+    if current:
+        stmt = '\n'.join(current).strip()
+        if stmt:
+            statements.append(stmt)
+    
+    return statements
+
+
 async def ensure_migrations_table(conn: AsyncConnection) -> None:
     """Create the schema_migrations table if it doesn't exist."""
     await conn.execute(
@@ -35,7 +80,7 @@ async def get_applied_migrations(conn: AsyncConnection) -> set:
     result = await conn.execute(
         text("SELECT migration_name FROM schema_migrations")
     )
-    rows = await result.fetchall()
+    rows = result.fetchall()
     return {row[0] for row in rows}
 
 
@@ -66,11 +111,14 @@ async def apply_migration(conn: AsyncConnection, migration_name: str, file_path:
     """Apply a single migration file."""
     logger.info(f"Applying migration: {migration_name}")
 
-    # Read and execute migration
+    # Read and split SQL into individual statements
     sql_content = file_path.read_text()
+    statements = split_sql_statements(sql_content)
 
-    # Execute the migration SQL
-    await conn.execute(text(sql_content))
+    # Execute each statement individually
+    for stmt in statements:
+        if stmt.strip():
+            await conn.execute(text(stmt))
 
     # Record the migration
     await conn.execute(

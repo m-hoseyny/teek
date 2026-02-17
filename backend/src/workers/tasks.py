@@ -91,6 +91,7 @@ async def transcribe_video_task(
     from ..config import Config
     from ..services.task_service import TaskService
     from ..services.video_service import VideoService
+    from ..services.subscription_service import SubscriptionService, UsageError
     from ..workers.job_queue import JobQueue
     from ..workers.progress import ProgressTracker
 
@@ -148,11 +149,30 @@ async def transcribe_video_task(
             if not video_path or not Path(video_path).exists():
                 raise ValueError("Failed to download video")
 
-            # Store the video path in task metadata for later retrieval by generate_clips_from_transcript
-            await task_service.task_repo.update_task_video_path(db, task_id, str(video_path))
-
             # Extract SRT content if provided by user
             srt_content = transcription_options.get("srt_content") if transcription_options else None
+
+            # Check usage limits after we have the video
+            subscription_service = SubscriptionService(db)
+            try:
+                usage_check = await subscription_service.check_can_process_video(
+                    user_id=user_id,
+                    video_path=Path(video_path),
+                    clip_count=clips_count or 5,
+                    will_transcribe=transcription_provider != "srt" or not srt_content,
+                )
+                if not usage_check["can_process"]:
+                    raise UsageError(usage_check["reason"])
+            except UsageError as e:
+                logger.warning(f"Usage limit exceeded for user {user_id}: {e}")
+                await task_service.task_repo.update_task_status(
+                    db, task_id, "error", progress_message=str(e)
+                )
+                await progress.error(str(e))
+                return {"task_id": task_id, "error": str(e), "limit_exceeded": True}
+
+            # Store the video path in task metadata for later retrieval by generate_clips_from_transcript
+            await task_service.task_repo.update_task_video_path(db, task_id, str(video_path))
 
             # If user provided SRT content, override provider to "srt" to skip AI transcription
             effective_provider = transcription_provider
@@ -178,6 +198,17 @@ async def transcribe_video_task(
 
             if not transcript:
                 raise ValueError("Failed to generate transcript")
+
+            # Deduct transcription minutes (skip if using SRT upload)
+            if transcription_provider != "srt" and not srt_content:
+                try:
+                    deducted_minutes = await subscription_service.deduct_transcription_minutes(
+                        user_id=user_id,
+                        video_path=Path(video_path),
+                    )
+                    logger.info(f"Deducted {deducted_minutes:.1f} transcription minutes for user {user_id}")
+                except Exception as deduct_error:
+                    logger.warning(f"Failed to deduct transcription minutes: {deduct_error}")
 
             await update_progress(50, "Transcription complete!")
 
@@ -340,6 +371,15 @@ async def transcribe_video_task(
 
             # Update task with clip IDs
             await task_service.task_repo.update_task_clips(db, task_id, clip_ids)
+
+            # Deduct clip generations
+            try:
+                await subscription_service.deduct_clip_generations(
+                    user_id=user_id,
+                    clip_count=len(clip_ids),
+                )
+            except Exception as deduct_error:
+                logger.warning(f"Failed to deduct clip generations: {deduct_error}")
 
             completion_message = f"Generated {len(clip_ids)} clips"
             await task_service.task_repo.update_task_status(
@@ -532,6 +572,7 @@ async def generate_clips_from_transcript(
     from ..config import Config
     from ..services.task_service import TaskService
     from ..services.video_service import VideoService
+    from ..services.subscription_service import SubscriptionService, UsageError
     from ..repositories.source_repository import SourceRepository
     from ..workers.progress import ProgressTracker
 
@@ -635,6 +676,25 @@ async def generate_clips_from_transcript(
                 logger.error(f"Video file not found. Checked paths: {[str(p) for p in possible_paths if 'possible_paths' in locals()]}")
                 raise ValueError(f"Video file not found for source type={source_type}, url={source_url}")
 
+            # Check usage limits before generating clips
+            subscription_service = SubscriptionService(db)
+            try:
+                usage_check = await subscription_service.check_can_process_video(
+                    user_id=user_id,
+                    video_path=video_path,
+                    clip_count=len(clips),
+                    will_transcribe=False,  # Already transcribed
+                )
+                if not usage_check["can_process"]:
+                    raise UsageError(usage_check["reason"])
+            except UsageError as e:
+                logger.warning(f"Usage limit exceeded for user {user_id}: {e}")
+                await task_service.task_repo.update_task_status(
+                    db, task_id, "error", progress_message=str(e)
+                )
+                await progress.error(str(e))
+                return {"task_id": task_id, "error": str(e), "limit_exceeded": True}
+
             await progress.update(50, f"Generating {len(clips)} video clips with edited subtitles...")
 
             # Build segments from clips (using edited text)
@@ -680,6 +740,15 @@ async def generate_clips_from_transcript(
                 db, task_id, "completed", progress=100, progress_message=completion_message
             )
 
+            # Deduct clip generations
+            try:
+                await subscription_service.deduct_clip_generations(
+                    user_id=user_id,
+                    clip_count=len(clips_result["clips"]),
+                )
+            except Exception as deduct_error:
+                logger.warning(f"Failed to deduct clip generations: {deduct_error}")
+
             await progress.complete()
             logger.info(f"Task {task_id} completed with {len(clips_result['clips'])} video clips")
 
@@ -716,6 +785,7 @@ async def retry_clips_analysis(
     from ..database import AsyncSessionLocal
     from ..config import Config
     from ..services.task_service import TaskService
+    from ..services.subscription_service import SubscriptionService, UsageError
     from ..workers.job_queue import JobQueue
     from ..workers.progress import ProgressTracker
 
@@ -787,6 +857,25 @@ async def retry_clips_analysis(
                 await progress.complete()
                 return {"task_id": task_id, "clips_created": 0, "message": "No valid segments found"}
 
+            # Check usage limits before creating clip records
+            subscription_service = SubscriptionService(db)
+            try:
+                usage_check = await subscription_service.check_can_process_video(
+                    user_id=user_id,
+                    video_path=None,  # No video needed for clip check
+                    clip_count=len(segments),
+                    will_transcribe=False,
+                )
+                if not usage_check["can_process"]:
+                    raise UsageError(usage_check["reason"])
+            except UsageError as e:
+                logger.warning(f"Usage limit exceeded for user {user_id}: {e}")
+                await task_service.task_repo.update_task_status(
+                    db, task_id, "error", progress_message=str(e)
+                )
+                await progress.error(str(e))
+                return {"task_id": task_id, "error": str(e), "limit_exceeded": True}
+
             await update_progress(70, f"Creating {len(segments)} new clip records for review...")
 
             # Create clip records in DB (without video files yet)
@@ -809,6 +898,15 @@ async def retry_clips_analysis(
 
             # Update task with clip IDs and awaiting_review status
             await task_service.task_repo.update_task_clips(db, task_id, clip_ids)
+
+            # Deduct clip generations for the new clip records
+            try:
+                await subscription_service.deduct_clip_generations(
+                    user_id=user_id,
+                    clip_count=len(clip_ids),
+                )
+            except Exception as deduct_error:
+                logger.warning(f"Failed to deduct clip generations: {deduct_error}")
 
             await task_service.task_repo.update_task_status(
                 db, task_id, "awaiting_review", progress=70,
