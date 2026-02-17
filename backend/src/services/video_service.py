@@ -378,18 +378,20 @@ class VideoService:
         ai_api_key: Optional[str] = None,
         ai_model: Optional[str] = None,
         prompt_id: Optional[str] = None,
+        clips_count: Optional[int] = None,
     ) -> Any:
         """
         Analyze transcript with AI to find relevant segments.
         This is already async, no need to wrap.
         """
-        logger.info(f"Starting AI analysis of transcript with prompt_id={prompt_id}")
+        logger.info(f"Starting AI analysis of transcript with prompt_id={prompt_id}, clips_count={clips_count}")
         relevant_parts = await get_most_relevant_parts_by_transcript(
             transcript,
             ai_provider=ai_provider,
             ai_api_key=ai_api_key,
             ai_model=ai_model,
             prompt_id=prompt_id,
+            clips_count=clips_count,
         )
         logger.info(f"AI analysis complete: {len(relevant_parts.most_relevant_segments)} segments found")
         return relevant_parts
@@ -402,6 +404,7 @@ class VideoService:
         ai_model: Optional[str] = None,
         progress_callback: Optional[callable] = None,
         prompt_id: Optional[str] = None,
+        clips_count: Optional[int] = None,
     ) -> Any:
         """
         Analyze transcript and emit heartbeat progress while waiting for the LLM call.
@@ -442,6 +445,7 @@ class VideoService:
                 ai_api_key=ai_api_key,
                 ai_model=ai_model,
                 prompt_id=prompt_id,
+                clips_count=clips_count,
             )
         finally:
             stop_heartbeat.set()
@@ -574,6 +578,7 @@ class VideoService:
         progress_callback: Optional[callable] = None,
         cancel_check: Optional[Callable[[], Awaitable[None]]] = None,
         prompt_id: Optional[str] = None,
+        clips_count: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Complete video processing pipeline.
@@ -682,6 +687,7 @@ class VideoService:
                     ai_model=ai_model,
                     progress_callback=progress_callback,
                     prompt_id=prompt_id,
+                    clips_count=clips_count,
                 )
                 diagnostics = getattr(relevant_parts, "diagnostics", {}) or {}
                 error_text = diagnostics.get("error")

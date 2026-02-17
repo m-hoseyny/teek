@@ -190,6 +190,11 @@ export default function Home() {
   const [selectedPromptId, setSelectedPromptId] = useState<string>("default");
   const [isLoadingPrompts, setIsLoadingPrompts] = useState(false);
 
+  // Clips count state
+  const [clipsCount, setClipsCount] = useState<number>(5);
+  const MIN_CLIPS_COUNT = 1;
+  const MAX_CLIPS_COUNT = 50;
+
   // Latest task state
   const [latestTask, setLatestTask] = useState<LatestTask | null>(null);
   const [isLoadingLatest, setIsLoadingLatest] = useState(false);
@@ -668,6 +673,7 @@ export default function Home() {
             provider: aiProvider,
             model: aiModel.trim() || DEFAULT_AI_MODELS[aiProvider],
             prompt_id: selectedPromptId,
+            clips_count: clipsCount,
           }
         }),
       });
@@ -919,6 +925,33 @@ export default function Home() {
               </Select>
               <p className="text-xs text-gray-500">
                 Choose the type of clips you want to generate. This affects how the AI selects segments.
+              </p>
+            </div>
+
+            {/* Clips Count Selector */}
+            <div className="space-y-2">
+              <label htmlFor="clips-count" className="text-sm font-medium text-black">
+                Number of Clips
+              </label>
+              <div className="px-2 pt-5">
+                <Slider
+                  id="clips-count"
+                  value={[clipsCount]}
+                  onValueChange={(value) => setClipsCount(Math.max(MIN_CLIPS_COUNT, Math.min(MAX_CLIPS_COUNT, value[0])))}
+                  min={MIN_CLIPS_COUNT}
+                  max={MAX_CLIPS_COUNT}
+                  step={1}
+                  disabled={isLoading}
+                  className="w-full"
+                />
+              </div>
+              <div className="flex justify-between text-xs text-gray-500">
+                <span>{MIN_CLIPS_COUNT} clip</span>
+                <span className="font-medium text-black">{clipsCount} clips</span>
+                <span>{MAX_CLIPS_COUNT} clips</span>
+              </div>
+              <p className="text-xs text-gray-500">
+                How many clips should the AI try to generate from this video.
               </p>
             </div>
 

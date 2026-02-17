@@ -617,6 +617,23 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
         else:
             raise HTTPException(status_code=400, detail="ai_options.prompt_id must be a string")
 
+    # Extract clips_count from ai_options (default to None which will use template default)
+    clips_count_raw = ai_options.get("clips_count")
+    clips_count = None
+    if clips_count_raw is not None:
+        if isinstance(clips_count_raw, int):
+            clips_count = clips_count_raw
+        elif isinstance(clips_count_raw, str):
+            try:
+                clips_count = int(clips_count_raw)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="ai_options.clips_count must be a valid integer")
+        else:
+            raise HTTPException(status_code=400, detail="ai_options.clips_count must be an integer")
+        # Validate reasonable range
+        if clips_count < 1 or clips_count > 50:
+            raise HTTPException(status_code=400, detail="ai_options.clips_count must be between 1 and 50")
+
     if not raw_source or not raw_source.get("url"):
         raise HTTPException(status_code=400, detail="Source URL is required")
 
@@ -659,6 +676,7 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
             ai_provider=ai_provider,
             transcript_review_enabled=transcript_review_enabled,
             prompt_id=prompt_id,
+            clips_count=clips_count,
         )
 
         # Get source type for worker
@@ -693,6 +711,7 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
                     transcription_runtime_options,
                     transcript_review_enabled,  # Pass the flag
                     prompt_id,  # Pass the selected prompt
+                    clips_count,  # Pass the clips count
                     queue_name=queue_name,
                 )
             else:
@@ -714,6 +733,7 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
                     resolved_zai_routing_mode,
                     transcription_runtime_options,
                     prompt_id,  # Pass the selected prompt
+                    clips_count,  # Pass the clips count
                     queue_name=queue_name,
                 )
         except Exception as enqueue_error:
@@ -1537,6 +1557,11 @@ async def retry_clips_generation(task_id: str, request: Request, db: AsyncSessio
             db, task_id, "processing", progress=55, progress_message="Re-analyzing transcript with AI for new clips..."
         )
 
+        # Extract prompt_id and clips_count from task metadata for the retry
+        task_metadata = task.get("metadata") or {}
+        retry_prompt_id = task_metadata.get("prompt_id")
+        retry_clips_count = task_metadata.get("clips_count")
+
         # Enqueue job for AI analysis and clip creation (without re-transcribing)
         from ...workers.job_queue import JobQueue
         job_id = await JobQueue.enqueue_job(
@@ -1544,6 +1569,8 @@ async def retry_clips_generation(task_id: str, request: Request, db: AsyncSessio
             task_id,
             user_id,
             transcript,
+            retry_prompt_id,
+            retry_clips_count,
             queue_name=config.arq_queue_name,
         )
 

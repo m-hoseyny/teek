@@ -50,6 +50,7 @@ class TaskService:
         ai_provider: str = "openai",
         transcript_review_enabled: bool = False,
         prompt_id: Optional[str] = None,
+        clips_count: Optional[int] = None,
     ) -> str:
         """
         Create a new task with associated source.
@@ -84,10 +85,12 @@ class TaskService:
             url=url
         )
 
-        # Build metadata with prompt_id for traceability
+        # Build metadata with prompt_id and clips_count for traceability
         metadata = {}
         if prompt_id:
             metadata["prompt_id"] = prompt_id
+        if clips_count is not None:
+            metadata["clips_count"] = clips_count
 
         # Create task
         task_id = await self.task_repo.create_task(
@@ -104,7 +107,7 @@ class TaskService:
             metadata=metadata if metadata else None,
         )
 
-        logger.info(f"Created task {task_id} for user {user_id} with prompt_id={prompt_id}")
+        logger.info(f"Created task {task_id} for user {user_id} with prompt_id={prompt_id}, clips_count={clips_count}")
         return task_id
 
     @staticmethod
@@ -276,6 +279,7 @@ class TaskService:
         cancel_check: Optional[Callable[[], Awaitable[None]]] = None,
         user_id: Optional[str] = None,
         prompt_id: Optional[str] = None,
+        clips_count: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Process a task: download video, analyze, create clips.
@@ -357,6 +361,7 @@ class TaskService:
                 progress_callback=update_progress,
                 cancel_check=cancel_check,
                 prompt_id=prompt_id,
+                clips_count=clips_count,
             )
 
             # Store the video path in task metadata for later retrieval

@@ -66,6 +66,7 @@ async def transcribe_video_task(
     transcription_options: Optional[Dict[str, Any]] = None,
     transcript_review_enabled: bool = False,
     prompt_id: Optional[str] = None,
+    clips_count: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Background worker task to download video and transcribe it.
@@ -80,6 +81,7 @@ async def transcribe_video_task(
         user_id: User ID who created the task
         transcript_review_enabled: If True, pause after transcription for user review
         prompt_id: Prompt template ID for AI clip selection
+        clips_count: Number of clips to generate
         Other args: Same as process_video_task
 
     Returns:
@@ -198,6 +200,8 @@ async def transcribe_video_task(
                     transcript,
                     ai_provider=selected_ai_provider,
                     ai_api_key=ai_api_key,
+                    prompt_id=prompt_id,
+                    clips_count=clips_count,
                 )
 
                 segments = [
@@ -280,6 +284,7 @@ async def transcribe_video_task(
                 ai_provider=selected_ai_provider,
                 ai_api_key=ai_api_key,
                 prompt_id=prompt_id,
+                clips_count=clips_count,
             )
 
             segments = [
@@ -387,6 +392,7 @@ async def process_video_task(
     ai_routing_mode: Optional[str] = None,
     transcription_options: Optional[Dict[str, Any]] = None,
     prompt_id: Optional[str] = None,
+    clips_count: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Background worker task to process a video.
@@ -408,6 +414,7 @@ async def process_video_task(
         ai_routing_mode: Optional z.ai key routing mode ("auto", "subscription", "metered")
         transcription_options: Optional local transcription overrides and task timeout
         prompt_id: Prompt template ID for AI clip selection
+        clips_count: Number of clips to generate
 
     Returns:
         Dict with processing results
@@ -465,6 +472,7 @@ async def process_video_task(
                 cancel_check=ensure_not_cancelled,
                 user_id=user_id,
                 prompt_id=prompt_id,
+                clips_count=clips_count,
             )
             try:
                 result = await asyncio.wait_for(result_coro, timeout=task_timeout_seconds)
@@ -698,6 +706,8 @@ async def retry_clips_analysis(
     task_id: str,
     user_id: str,
     transcript: str,
+    prompt_id: Optional[str] = None,
+    clips_count: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Worker task to retry clip generation by re-running AI analysis on existing transcript.
@@ -754,6 +764,8 @@ async def retry_clips_analysis(
                 transcript,
                 ai_provider=ai_provider,
                 ai_api_key=ai_api_key,
+                prompt_id=prompt_id,
+                clips_count=clips_count,
             )
 
             segments = [

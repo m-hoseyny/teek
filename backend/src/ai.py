@@ -103,6 +103,7 @@ def _build_transcript_agent(
     ai_api_key: Optional[str] = None,
     ai_model: Optional[str] = None,
     prompt_id: Optional[str] = None,
+    clips_count: Optional[int] = None,
 ) -> tuple[Agent, str, str]:
     selected_provider = (ai_provider or _default_ai_provider()).strip().lower()
     if selected_provider not in SUPPORTED_AI_PROVIDERS:
@@ -111,8 +112,8 @@ def _build_transcript_agent(
     selected_model = _resolve_ai_model(selected_provider, ai_model)
     resolved_key = (ai_api_key or "").strip()
 
-    # Get system prompt from repository based on prompt_id
-    system_prompt = PromptRepository.get_system_prompt(prompt_id)
+    # Get system prompt from repository based on prompt_id and clips_count
+    system_prompt = PromptRepository.get_system_prompt(prompt_id, clips_count)
 
     if selected_provider == "openai":
         from pydantic_ai.models.openai import OpenAIModel
@@ -167,6 +168,7 @@ async def get_most_relevant_parts_by_transcript(
     ai_api_key: Optional[str] = None,
     ai_model: Optional[str] = None,
     prompt_id: Optional[str] = None,
+    clips_count: Optional[int] = None,
 ) -> TranscriptAnalysis:
     """Get the most relevant parts of a transcript for creating clips - simplified version."""
     transcript_agent, resolved_provider, resolved_model = _build_transcript_agent(
@@ -174,13 +176,15 @@ async def get_most_relevant_parts_by_transcript(
         ai_api_key=ai_api_key,
         ai_model=ai_model,
         prompt_id=prompt_id,
+        clips_count=clips_count,
     )
     logger.info(
-        "Starting AI analysis of transcript (%s chars) using provider=%s model=%s prompt=%s",
+        "Starting AI analysis of transcript (%s chars) using provider=%s model=%s prompt=%s clips_count=%s",
         len(transcript),
         resolved_provider,
         resolved_model,
         prompt_id or "default",
+        clips_count or "default",
     )
 
     try:
@@ -286,6 +290,7 @@ def get_most_relevant_parts_sync(
     ai_api_key: Optional[str] = None,
     ai_model: Optional[str] = None,
     prompt_id: Optional[str] = None,
+    clips_count: Optional[int] = None,
 ) -> TranscriptAnalysis:
     """Synchronous wrapper for the async function."""
     return asyncio.run(get_most_relevant_parts_by_transcript(
@@ -294,4 +299,5 @@ def get_most_relevant_parts_sync(
         ai_api_key=ai_api_key,
         ai_model=ai_model,
         prompt_id=prompt_id,
+        clips_count=clips_count,
     ))

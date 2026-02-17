@@ -5,6 +5,14 @@ Prompt repository - centralized management of AI prompts for clip generation.
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 
+import logging
+from logging import StreamHandler, Formatter
+
+console_handler = StreamHandler()
+console_handler.setFormatter(Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+logger.addHandler(console_handler)
+logger.setLevel(logging.INFO)
+
 
 @dataclass
 class PromptTemplate:
@@ -51,7 +59,7 @@ TIMESTAMP REQUIREMENTS - EXTREMELY IMPORTANT:
 - NEVER use the same timestamp for both start_time and end_time
 - Example: start_time: "02:25", end_time: "02:35" (NOT "02:25" and "02:25")
 
-Find 3-7 compelling segments that would work well as standalone clips. Quality over quantity - choose segments that would genuinely engage viewers and have proper time ranges.""",
+Find {clips_count} compelling segments that would work well as standalone clips. Quality over quantity - choose segments that would genuinely engage viewers and have proper time ranges.""",
     is_default=True,
 )
 
@@ -90,7 +98,7 @@ TIMESTAMP REQUIREMENTS - EXTREMELY IMPORTANT:
 - NEVER use the same timestamp for both start_time and end_time
 - Example: start_time: "02:25", end_time: "02:35" (NOT "02:25" and "02:25")
 
-Find 3-7 educational segments that work as standalone learning clips. Focus on the most teachable moments that provide clear value.""",
+Find {clips_count} educational segments that work as standalone learning clips. Focus on the most teachable moments that provide clear value.""",
 )
 
 # Comedy/Entertainment prompt
@@ -128,7 +136,7 @@ TIMESTAMP REQUIREMENTS - EXTREMELY IMPORTANT:
 - NEVER use the same timestamp for both start_time and end_time
 - Example: start_time: "02:25", end_time: "02:35" (NOT "02:25" and "02:25")
 
-Find 3-7 funny segments that work as standalone entertainment clips. Quality beats quantity - only select genuinely amusing moments.""",
+Find {clips_count} funny segments that work as standalone entertainment clips. Quality beats quantity - only select genuinely amusing moments.""",
 )
 
 # Interview/Podcast prompt
@@ -166,7 +174,7 @@ TIMESTAMP REQUIREMENTS - EXTREMELY IMPORTANT:
 - NEVER use the same timestamp for both start_time and end_time
 - Example: start_time: "02:25", end_time: "02:35" (NOT "02:25" and "02:25")
 
-Find 3-7 compelling segments that work as standalone interview highlights. Focus on moments that reveal something interesting about the speakers or topics.""",
+Find {clips_count} compelling segments that work as standalone interview highlights. Focus on moments that reveal something interesting about the speakers or topics.""",
 )
 
 # Motivational/Inspirational prompt
@@ -204,7 +212,7 @@ TIMESTAMP REQUIREMENTS - EXTREMELY IMPORTANT:
 - NEVER use the same timestamp for both start_time and end_time
 - Example: start_time: "02:25", end_time: "02:35" (NOT "02:25" and "02:25")
 
-Find 3-7 motivational segments that work as standalone inspirational clips. Focus on moments that genuinely move and motivate.""",
+Find {clips_count} motivational segments that work as standalone inspirational clips. Focus on moments that genuinely move and motivate.""",
 )
 
 # Viral/Trending prompt
@@ -242,7 +250,7 @@ TIMESTAMP REQUIREMENTS - EXTREMELY IMPORTANT:
 - NEVER use the same timestamp for both start_time and end_time
 - Example: start_time: "02:25", end_time: "02:35" (NOT "02:25" and "02:25")
 
-Find 3-7 segments with maximum viral potential. Think about what makes people stop scrolling and share. Quality over quantity - only select truly shareable moments.""",
+Find {clips_count} segments with maximum viral potential. Think about what makes people stop scrolling and share. Quality over quantity - only select truly shareable moments.""",
 )
 
 
@@ -290,24 +298,34 @@ class PromptRepository:
         ]
 
     @classmethod
-    def get_system_prompt(cls, prompt_id: Optional[str] = None) -> str:
+    def get_system_prompt(cls, prompt_id: Optional[str] = None, clips_count: Optional[int] = None) -> str:
         """Get the system prompt text for a given prompt ID.
         
         Args:
             prompt_id: The ID of the prompt template. If None, returns default.
+            clips_count: Number of clips to generate. If provided, replaces {clips_count} in the prompt.
             
         Returns:
-            The system prompt text.
+            The system prompt text with clips_count replaced if provided.
         """
         if prompt_id is None:
-            return cls.get_default_prompt().system_prompt
+            logger.info("No prompt_id provided, using default prompt")
+            prompt_text = cls.get_default_prompt().system_prompt
+        else:
+            prompt = cls._prompts.get(prompt_id)
+            if prompt is None:
+                logger.info(f"Prompt ID {prompt_id} not found, using default prompt")
+                prompt_text = cls.get_default_prompt().system_prompt
+            else:
+                logger.info(f"Using prompt ID {prompt_id}")
+                prompt_text = prompt.system_prompt
         
-        prompt = cls._prompts.get(prompt_id)
-        if prompt is None:
-            # Fallback to default if prompt_id not found
-            return cls.get_default_prompt().system_prompt
+        # Replace clips_count placeholder if value is provided
+        logger.info(f"Using clips_count {clips_count}")
+        if clips_count is not None:
+            prompt_text = prompt_text.replace("{clips_count}", str(clips_count))
         
-        return prompt.system_prompt
+        return prompt_text
 
     @classmethod
     def validate_prompt_id(cls, prompt_id: Optional[str]) -> bool:
