@@ -1113,8 +1113,8 @@ export default function TaskPage() {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    <div className="bg-white border border-gray-200 rounded-lg p-4 max-h-[300px] overflow-y-auto">
-                      <pre className="text-sm text-gray-700 whitespace-pre-wrap font-mono">
+                    <div className="bg-background border border-border rounded-lg p-4 max-h-[300px] overflow-y-auto">
+                      <pre className="text-sm text-foreground whitespace-pre-wrap font-mono">
                         {transcript || "Loading transcript..."}
                       </pre>
                     </div>
@@ -1234,9 +1234,9 @@ export default function TaskPage() {
                           </div>
 
                           {/* Current Transcript (Read-only) */}
-                          <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                            <p className="text-xs text-gray-500 uppercase font-medium mb-1">Transcript</p>
-                            <p className="text-sm text-gray-800">
+                          <div className="bg-background border border-border rounded-lg p-3">
+                            <p className="text-xs text-muted-foreground uppercase font-medium mb-1">Transcript</p>
+                            <p className="text-sm text-foreground">
                               {clip.text || "No transcript available"}
                             </p>
                           </div>
@@ -1268,18 +1268,18 @@ export default function TaskPage() {
                         </div>
                       ) : (
                         <>
-                          <div className="flex items-center gap-2 text-sm text-gray-600 mb-3">
-                            <span className="font-mono bg-gray-100 px-2 py-1 rounded">
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground mb-3">
+                            <span className="font-mono bg-muted px-2 py-1 rounded">
                               {clip.start_time} - {clip.end_time}
                             </span>
                           </div>
 
-                          <p className="text-sm text-gray-800 mb-3 bg-gray-50 p-3 rounded">
+                          <p className="text-sm text-foreground mb-3 bg-muted p-3 rounded">
                             {clip.text || "No transcript available"}
                           </p>
 
                           {clip.reasoning && (
-                            <p className="text-xs text-gray-500 italic mb-3">
+                            <p className="text-xs text-muted-foreground italic mb-3">
                               <span className="font-medium">AI reasoning:</span> {clip.reasoning}
                             </p>
                           )}

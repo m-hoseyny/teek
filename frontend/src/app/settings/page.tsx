@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSession } from "@/lib/auth-client";
 import { SettingsSaveStatus } from "./components/settings-save-status";
+import { Header } from "@/components/header";
 import { SettingsSectionAi } from "./components/settings-section-ai";
 import { SettingsSectionFont } from "./components/settings-section-font";
 import { SettingsSectionTranscription } from "./components/settings-section-transcription";
@@ -922,30 +923,7 @@ function SettingsPageContent() {
 
   return (
     <div className="min-h-screen bg-white">
-      <div className="border-b bg-white">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex justify-between items-center">
-            <Link href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity cursor-pointer">
-              <Image src="/brand/logo.png" alt="Teek logo" width={96} height={96} className="h-24 w-24 object-contain" />
-              <h1 className="text-xl font-bold text-black">Teek</h1>
-            </Link>
-
-            <div className="flex items-center gap-3">
-              <Avatar className="w-8 h-8">
-                <AvatarImage src={session.user.image || ""} />
-                <AvatarFallback className="bg-gray-100 text-black text-sm">
-                  {session.user.name?.charAt(0) || session.user.email?.charAt(0) || "U"}
-                </AvatarFallback>
-              </Avatar>
-              <div className="hidden sm:block">
-                <p className="text-sm font-medium text-black">{session.user.name}</p>
-                <p className="text-xs text-gray-500">{session.user.email}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
+      <Header />
       <div className="max-w-7xl mx-auto px-4 py-10">
         <div className="mb-6">
           <div className="flex items-center gap-2 mb-2">
