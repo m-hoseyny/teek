@@ -168,7 +168,8 @@ export default function Home() {
   const [isUploadingFont, setIsUploadingFont] = useState(false);
   const [fontUploadMessage, setFontUploadMessage] = useState<string | null>(null);
   const [fontUploadError, setFontUploadError] = useState<string | null>(null);
-  const [useCustomSrt, setUseCustomSrt] = useState(true);
+  const [useAiTranscription, setUseAiTranscription] = useState(false);
+  const [userPlan, setUserPlan] = useState<string | null>(null);
   const [srtFile, setSrtFile] = useState<File | null>(null);
   const [srtFileName, setSrtFileName] = useState<string | null>(null);
   const srtInputRef = useRef<HTMLInputElement | null>(null);
@@ -421,6 +422,28 @@ export default function Home() {
     fetchLatestTask();
   }, [session?.user?.id, apiUrl]);
 
+  // Load user subscription plan
+  useEffect(() => {
+    const fetchUserPlan = async () => {
+      if (!session?.user?.id) return;
+      try {
+        const response = await fetch(`${apiUrl}/tasks/subscription/usage`, {
+          headers: {
+            user_id: session.user.id,
+          },
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setUserPlan(data.plan);
+        }
+      } catch (error) {
+        console.error("Failed to load user plan:", error);
+      }
+    };
+
+    void fetchUserPlan();
+  }, [apiUrl, session?.user?.id]);
+
   // Always treat file input as uncontrolled, and store file in a ref
   const fileRef = useRef<File | null>(null);
 
@@ -617,8 +640,8 @@ export default function Home() {
         videoUrl = uploadUrl.trim();
       }
 
-      // Read SRT file content if provided
-      if (useCustomSrt && srtFile) {
+      // Read SRT file content if not using AI transcription
+      if (!useAiTranscription && srtFile) {
         srtContent = await srtFile.text();
       }
 
@@ -1036,47 +1059,219 @@ export default function Home() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Source Type Selector */}
-            <div className="space-y-2">
-              <label htmlFor="source-type" className="text-sm font-medium text-black">
-                Source Type
-              </label>
-              <Select value={sourceType} onValueChange={(value: "upload_file" | "video_url") => {
-                setSourceType(value);
-                // Reset file input and fileName when switching away from file upload
-                if (value !== "upload_file") {
-                  setFileName(null);
-                  fileRef.current = null;
-                  if (fileInputRef.current) {
-                    fileInputRef.current.value = "";
+            {/* ===== SECTION 1: SOURCE & SUBTITLES ===== */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold text-gray-500 uppercase tracking-wide">Source & Subtitles</h3>
+              
+              {/* Source Type Selector */}
+              <div className="space-y-2">
+                <label htmlFor="source-type" className="text-sm font-medium text-black">
+                  Source Type
+                </label>
+                <Select value={sourceType} onValueChange={(value: "upload_file" | "video_url") => {
+                  setSourceType(value);
+                  // Reset file input and fileName when switching away from file upload
+                  if (value !== "upload_file") {
+                    setFileName(null);
+                    fileRef.current = null;
+                    if (fileInputRef.current) {
+                      fileInputRef.current.value = "";
+                    }
                   }
-                }
-                // Reset upload URL when switching away from video URL
-                if (value !== "video_url") {
-                  setUploadUrl("");
-                }
-              }} disabled={isLoading}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select source type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="upload_file">
-                    <div className="flex items-center gap-2">
-                      <ArrowRight className="w-4 h-4" />
-                      Upload File
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="video_url">
-                    <div className="flex items-center gap-2">
-                      <ArrowRight className="w-4 h-4" />
-                      Video URL
-                    </div>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+                  // Reset upload URL when switching away from video URL
+                  if (value !== "video_url") {
+                    setUploadUrl("");
+                  }
+                }} disabled={isLoading}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select source type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="upload_file">
+                      <div className="flex items-center gap-2">
+                        <ArrowRight className="w-4 h-4" />
+                        Upload File
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="video_url">
+                      <div className="flex items-center gap-2">
+                        <ArrowRight className="w-4 h-4" />
+                        Video URL
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Dynamic Input Based on Source Type */}
+              {sourceType === "upload_file" ? (
+                <div key="source-upload-file" className="space-y-2">
+                  <label className="text-sm font-medium text-black">
+                    Upload Video File
+                  </label>
+                  <input
+                    id="video-upload"
+                    type="file"
+                    accept="video/*,video/x-matroska,.mkv"
+                    ref={fileInputRef}
+                    onChange={handleFileChange}
+                    disabled={isLoading}
+                    className="hidden"
+                  />
+                  <div
+                    onClick={handleDropZoneClick}
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                    className={`relative border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+                      isDragOver
+                        ? "border-blue-500 bg-blue-50"
+                        : fileName
+                          ? "border-green-500 bg-green-50"
+                          : "border-gray-300 bg-gray-50 hover:border-gray-400 hover:bg-gray-100"
+                    } ${isLoading ? "opacity-50 cursor-not-allowed" : ""}`}
+                  >
+                    {fileName ? (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-center gap-2 text-green-700">
+                          <CheckCircle className="w-5 h-5" />
+                          <span className="font-medium">{fileName}</span>
+                        </div>
+                        <p className="text-xs text-gray-500">
+                          Click or drag another file to replace
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="flex justify-center">
+                          <div className="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center">
+                            <Upload className="w-6 h-6 text-gray-600" />
+                          </div>
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-gray-700">
+                            Drop your video here, or click to browse
+                          </p>
+                          <p className="text-xs text-gray-500 mt-1">
+                            Supports MP4, MOV, MKV, and other video formats
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div key="source-video-url" className="space-y-2">
+                  <label htmlFor="video-url" className="text-sm font-medium text-black">
+                    Video URL
+                  </label>
+                  <Input
+                    id="video-url"
+                    type="url"
+                    placeholder="https://example.com/video.mp4"
+                    value={uploadUrl}
+                    onChange={(e) => setUploadUrl(e.target.value)}
+                    disabled={isLoading}
+                    className="h-11"
+                  />
+                  <p className="text-xs text-gray-500">
+                    Direct link to video file (MP4, MOV, MKV, etc.)
+                  </p>
+                </div>
+              )}
+
+              {/* SRT Upload Section */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-black">
+                  Subtitle File (SRT)
+                </label>
+                <div className="mt-3 space-y-2">
+                  <input
+                    id="srt-upload"
+                    type="file"
+                    accept=".srt"
+                    ref={srtInputRef}
+                    onChange={handleSrtFileChange}
+                    disabled={isLoading}
+                    className="hidden"
+                  />
+                  <div
+                    onClick={() => srtInputRef.current?.click()}
+                    className={`relative border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors ${
+                      srtFileName
+                        ? "border-green-500 bg-green-50"
+                        : "border-gray-300 bg-gray-50 hover:border-gray-400 hover:bg-gray-100"
+                    } ${isLoading ? "opacity-50 cursor-not-allowed" : ""}`}
+                  >
+                    {srtFileName ? (
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-center gap-2 text-green-700">
+                          <FileText className="w-4 h-4" />
+                          <span className="font-medium text-sm">{srtFileName}</span>
+                        </div>
+                        <p className="text-xs text-gray-500">
+                          Click to replace
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        <div className="flex justify-center">
+                          <FileText className="w-5 h-5 text-gray-400" />
+                        </div>
+                        <p className="text-sm text-gray-600">
+                          Click to upload SRT file
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    Upload your own subtitle file or enable AI transcription below.
+                  </p>
+                </div>
+              </div>
+
+              {/* AI Transcription Option */}
+              <div className="pt-2">
+                <div className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    id="use-ai-transcription"
+                    checked={useAiTranscription}
+                    onChange={(e) => {
+                      setUseAiTranscription(e.target.checked);
+                    }}
+                    disabled={isLoading || userPlan === "free"}
+                    className="mt-0.5 w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  />
+                  <div className="flex-1">
+                    <label htmlFor="use-ai-transcription" className={`text-sm font-medium text-black cursor-pointer ${userPlan === "free" ? "opacity-50" : ""}`}>
+                      Use AI generated subtitle (transcript)
+                    </label>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {userPlan === "free" 
+                        ? "Upgrade to a paid plan to use AI-generated subtitles."
+                        : "Enable AI transcription instead of uploading your own SRT file."}
+                    </p>
+
+                    {useAiTranscription && (
+                      <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                        <p className="text-xs text-amber-800">
+                          Warning: AI-generated transcripts will consume transcription minutes from your plan.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
 
-            {/* Prompt Type Selector */}
+            <div className="border-t border-gray-200" />
+
+            {/* ===== SECTION 2: CLIP SETTINGS ===== */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold text-gray-500 uppercase tracking-wide">Clip Settings</h3>
+              
+              {/* Prompt Type Selector */}
             <div className="space-y-2">
               <label htmlFor="prompt-type" className="text-sm font-medium text-black">
                 Clip Style
@@ -1238,91 +1433,16 @@ export default function Home() {
                 </div>
               </div>
             </div>
-
-            {/* Custom SRT Upload Option */}
-            <div className="pt-2">
-              <div className="flex items-start gap-3">
-                <input
-                  type="checkbox"
-                  id="use-custom-srt"
-                  checked={useCustomSrt}
-                  onChange={(e) => {
-                    setUseCustomSrt(e.target.checked);
-                    if (!e.target.checked) {
-                      setSrtFile(null);
-                      setSrtFileName(null);
-                      if (srtInputRef.current) {
-                        srtInputRef.current.value = "";
-                      }
-                    }
-                  }}
-                  disabled={isLoading}
-                  className="mt-0.5 w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                />
-                <div className="flex-1">
-                  <label htmlFor="use-custom-srt" className="text-sm font-medium text-black cursor-pointer">
-                    Use my own SRT subtitle file
-                  </label>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Skip AI transcription and use your own subtitle file instead.
-                  </p>
-
-                  {useCustomSrt && (
-                    <div className="mt-3 space-y-2">
-                      <input
-                        id="srt-upload"
-                        type="file"
-                        accept=".srt"
-                        ref={srtInputRef}
-                        onChange={handleSrtFileChange}
-                        disabled={isLoading}
-                        className="hidden"
-                      />
-                      <div
-                        onClick={() => srtInputRef.current?.click()}
-                        className={`relative border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors ${
-                          srtFileName
-                            ? "border-green-500 bg-green-50"
-                            : "border-gray-300 bg-gray-50 hover:border-gray-400 hover:bg-gray-100"
-                        } ${isLoading ? "opacity-50 cursor-not-allowed" : ""}`}
-                      >
-                        {srtFileName ? (
-                          <div className="space-y-1">
-                            <div className="flex items-center justify-center gap-2 text-green-700">
-                              <FileText className="w-4 h-4" />
-                              <span className="font-medium text-sm">{srtFileName}</span>
-                            </div>
-                            <p className="text-xs text-gray-500">
-                              Click to replace
-                            </p>
-                          </div>
-                        ) : (
-                          <div className="space-y-1">
-                            <div className="flex justify-center">
-                              <FileText className="w-5 h-5 text-gray-400" />
-                            </div>
-                            <p className="text-sm text-gray-600">
-                              Click to upload SRT file
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {!useCustomSrt && (
-                    <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                      <p className="text-xs text-amber-800">
-                        Warning: AI-generated transcripts will consume significant tokens and may increase processing costs.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
             </div>
 
-            {/* Font Customization Section */}
-            <div className="space-y-4 border rounded-lg p-4 bg-gray-50">
+            <div className="border-t border-gray-200" />
+
+            {/* ===== SECTION 3: CAPTION SETTINGS ===== */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold text-gray-500 uppercase tracking-wide">Caption Settings</h3>
+              
+              {/* Font Customization Section */}
+              <div className="space-y-4 border rounded-lg p-4 bg-gray-50">
               <div
                 className="flex items-center justify-between cursor-pointer"
                 onClick={() => setShowAdvancedOptions(!showAdvancedOptions)}
@@ -1693,6 +1813,7 @@ export default function Home() {
                 </div>
               )}
             </div>
+          </div>
 
             {isLoading && (
               <div className="space-y-4">

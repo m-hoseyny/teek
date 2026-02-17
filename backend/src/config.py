@@ -68,7 +68,7 @@ class Config:
                 "name": "Free",
                 "price_monthly": 0,
                 "transcription_minutes": 0,
-                "clip_generations": 0,
+                "clip_generations": 5,
                 "watermark": True,
                 "custom_font": False,
                 "custom_size": False,
