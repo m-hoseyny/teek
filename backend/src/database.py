@@ -4,6 +4,11 @@ from dotenv import load_dotenv
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy import text
+import logging
+
+from src.migrations import run_migrations
+
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -487,6 +492,127 @@ async def init_db():
                 """
             )
         )
+        await conn.execute(
+            text(
+                """
+                -- Add plan column to users table
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS plan VARCHAR(20) NOT NULL DEFAULT 'free'
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conname = 'check_users_plan'
+                    ) THEN
+                        ALTER TABLE users
+                        ADD CONSTRAINT check_users_plan
+                        CHECK (plan IN ('free', 'starter', 'pro', 'business'));
+                    END IF;
+                END $$;
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(255)
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS subscriptions (
+                    id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+                    user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    stripe_subscription_id VARCHAR(255) NOT NULL,
+                    stripe_customer_id VARCHAR(255) NOT NULL,
+                    plan VARCHAR(20) NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'active',
+                    current_period_start TIMESTAMPTZ NOT NULL,
+                    current_period_end TIMESTAMPTZ NOT NULL,
+                    cancel_at_period_end BOOLEAN NOT NULL DEFAULT false,
+                    canceled_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    CONSTRAINT check_subscriptions_plan
+                        CHECK (plan IN ('starter', 'pro', 'business')),
+                    CONSTRAINT check_subscriptions_status
+                        CHECK (status IN ('active', 'canceled', 'past_due', 'unpaid', 'paused'))
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS invoices (
+                    id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+                    user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    subscription_id VARCHAR(36) REFERENCES subscriptions(id) ON DELETE SET NULL,
+                    stripe_invoice_id VARCHAR(255) NOT NULL,
+                    stripe_customer_id VARCHAR(255) NOT NULL,
+                    amount INTEGER NOT NULL,
+                    currency VARCHAR(3) NOT NULL DEFAULT 'usd',
+                    status VARCHAR(20) NOT NULL,
+                    invoice_url VARCHAR(500),
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    CONSTRAINT check_invoices_status
+                        CHECK (status IN ('draft', 'open', 'paid', 'uncollectible', 'void'))
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS usage_tracking (
+                    id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+                    user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    year INTEGER NOT NULL,
+                    month INTEGER NOT NULL CHECK (month BETWEEN 1 AND 12),
+                    transcription_minutes_used INTEGER NOT NULL DEFAULT 0,
+                    clip_generations_used INTEGER NOT NULL DEFAULT 0,
+                    transcription_minutes_limit INTEGER NOT NULL,
+                    clip_generations_limit INTEGER NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    UNIQUE(user_id, year, month)
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id)
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS idx_invoices_user_id ON invoices(user_id)
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS idx_usage_tracking_period ON usage_tracking(user_id, year, month)
+                """
+            )
+        )
+
+        # Run SQL file migrations
+        await run_migrations(conn)
 
 # Close database connections
 async def close_db():

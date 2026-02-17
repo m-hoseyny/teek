@@ -1,4 +1,22 @@
 services:
+  # Database migrations - runs before backend and workers
+  migrations:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: supoclip-migrations
+    command: [".venv/bin/python", "-m", "src.migrations_cli"]
+    volumes:
+      - ./backend/src:/app/src
+      - ./backend/migrations:/app/migrations
+    environment:
+      - PYTHONPATH=/app
+      - DATABASE_URL=postgresql+asyncpg://supoclip:supoclip_password@postgres:5432/supoclip
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   # Local host mapping values come from root `.env` (see `.env.sample` and `docs/local-host-mappings.md`).
   frontend:
     build:
@@ -84,6 +102,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     healthcheck:
@@ -146,6 +166,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
       backend:
         condition: service_healthy
 
@@ -203,6 +225,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
       backend:
         condition: service_healthy
 
@@ -259,6 +283,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
       backend:
         condition: service_healthy
 
