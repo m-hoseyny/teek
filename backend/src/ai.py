@@ -12,6 +12,7 @@ from pydantic_ai import Agent
 from pydantic import BaseModel, Field
 
 from .config import Config
+from .repositories.prompt_repository import PromptRepository
 
 logger = logging.getLogger(__name__)
 config = Config()
@@ -101,6 +102,7 @@ def _build_transcript_agent(
     ai_provider: Optional[str] = None,
     ai_api_key: Optional[str] = None,
     ai_model: Optional[str] = None,
+    prompt_id: Optional[str] = None,
 ) -> tuple[Agent, str, str]:
     selected_provider = (ai_provider or _default_ai_provider()).strip().lower()
     if selected_provider not in SUPPORTED_AI_PROVIDERS:
@@ -108,6 +110,9 @@ def _build_transcript_agent(
 
     selected_model = _resolve_ai_model(selected_provider, ai_model)
     resolved_key = (ai_api_key or "").strip()
+
+    # Get system prompt from repository based on prompt_id
+    system_prompt = PromptRepository.get_system_prompt(prompt_id)
 
     if selected_provider == "openai":
         from pydantic_ai.models.openai import OpenAIModel
@@ -150,7 +155,7 @@ def _build_transcript_agent(
         Agent(
             model=model,
             output_type=TranscriptAnalysis,
-            system_prompt=simplified_system_prompt,
+            system_prompt=system_prompt,
         ),
         selected_provider,
         selected_model,
@@ -161,18 +166,21 @@ async def get_most_relevant_parts_by_transcript(
     ai_provider: Optional[str] = None,
     ai_api_key: Optional[str] = None,
     ai_model: Optional[str] = None,
+    prompt_id: Optional[str] = None,
 ) -> TranscriptAnalysis:
     """Get the most relevant parts of a transcript for creating clips - simplified version."""
     transcript_agent, resolved_provider, resolved_model = _build_transcript_agent(
         ai_provider=ai_provider,
         ai_api_key=ai_api_key,
         ai_model=ai_model,
+        prompt_id=prompt_id,
     )
     logger.info(
-        "Starting AI analysis of transcript (%s chars) using provider=%s model=%s",
+        "Starting AI analysis of transcript (%s chars) using provider=%s model=%s prompt=%s",
         len(transcript),
         resolved_provider,
         resolved_model,
+        prompt_id or "default",
     )
 
     try:
@@ -272,6 +280,18 @@ Transcript:
             },
         )
 
-def get_most_relevant_parts_sync(transcript: str) -> TranscriptAnalysis:
+def get_most_relevant_parts_sync(
+    transcript: str,
+    ai_provider: Optional[str] = None,
+    ai_api_key: Optional[str] = None,
+    ai_model: Optional[str] = None,
+    prompt_id: Optional[str] = None,
+) -> TranscriptAnalysis:
     """Synchronous wrapper for the async function."""
-    return asyncio.run(get_most_relevant_parts_by_transcript(transcript))
+    return asyncio.run(get_most_relevant_parts_by_transcript(
+        transcript,
+        ai_provider=ai_provider,
+        ai_api_key=ai_api_key,
+        ai_model=ai_model,
+        prompt_id=prompt_id,
+    ))

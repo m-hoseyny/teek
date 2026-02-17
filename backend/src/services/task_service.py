@@ -49,6 +49,7 @@ class TaskService:
         transcription_provider: str = "local",
         ai_provider: str = "openai",
         transcript_review_enabled: bool = False,
+        prompt_id: Optional[str] = None,
     ) -> str:
         """
         Create a new task with associated source.
@@ -83,6 +84,11 @@ class TaskService:
             url=url
         )
 
+        # Build metadata with prompt_id for traceability
+        metadata = {}
+        if prompt_id:
+            metadata["prompt_id"] = prompt_id
+
         # Create task
         task_id = await self.task_repo.create_task(
             self.db,
@@ -95,9 +101,10 @@ class TaskService:
             transcription_provider=transcription_provider,
             ai_provider=ai_provider,
             transcript_review_enabled=transcript_review_enabled,
+            metadata=metadata if metadata else None,
         )
 
-        logger.info(f"Created task {task_id} for user {user_id}")
+        logger.info(f"Created task {task_id} for user {user_id} with prompt_id={prompt_id}")
         return task_id
 
     @staticmethod
@@ -268,6 +275,7 @@ class TaskService:
         progress_callback: Optional[Callable] = None,
         cancel_check: Optional[Callable[[], Awaitable[None]]] = None,
         user_id: Optional[str] = None,
+        prompt_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Process a task: download video, analyze, create clips.
@@ -348,6 +356,7 @@ class TaskService:
                 subtitle_style=subtitle_style,
                 progress_callback=update_progress,
                 cancel_check=cancel_check,
+                prompt_id=prompt_id,
             )
 
             # Store the video path in task metadata for later retrieval

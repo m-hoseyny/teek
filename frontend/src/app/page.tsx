@@ -185,6 +185,11 @@ export default function Home() {
   const [aiProvider, setAiProvider] = useState<AiProvider>("openai");
   const [aiModel, setAiModel] = useState<string>(DEFAULT_AI_MODELS.openai);
 
+  // Prompt selection state
+  const [availablePrompts, setAvailablePrompts] = useState<Array<{ id: string; name: string; description: string }>>([]);
+  const [selectedPromptId, setSelectedPromptId] = useState<string>("default");
+  const [isLoadingPrompts, setIsLoadingPrompts] = useState(false);
+
   // Latest task state
   const [latestTask, setLatestTask] = useState<LatestTask | null>(null);
   const [isLoadingLatest, setIsLoadingLatest] = useState(false);
@@ -349,6 +354,38 @@ export default function Home() {
     };
 
     void loadTranscriptionLimits();
+  }, [apiUrl, session?.user?.id]);
+
+  // Load available prompts
+  useEffect(() => {
+    const loadPrompts = async () => {
+      if (!session?.user?.id) return;
+      try {
+        setIsLoadingPrompts(true);
+        const response = await fetch(`${apiUrl}/tasks/prompts`, {
+          headers: {
+            user_id: session.user.id,
+          },
+        });
+        if (!response.ok) {
+          return;
+        }
+        const data = await response.json();
+        if (data.prompts && Array.isArray(data.prompts)) {
+          setAvailablePrompts(data.prompts);
+          // Set default prompt if available
+          if (data.default_prompt_id) {
+            setSelectedPromptId(data.default_prompt_id);
+          }
+        }
+      } catch (promptError) {
+        console.error("Failed to load prompts:", promptError);
+      } finally {
+        setIsLoadingPrompts(false);
+      }
+    };
+
+    void loadPrompts();
   }, [apiUrl, session?.user?.id]);
 
   // Load latest task
@@ -630,6 +667,7 @@ export default function Home() {
           ai_options: {
             provider: aiProvider,
             model: aiModel.trim() || DEFAULT_AI_MODELS[aiProvider],
+            prompt_id: selectedPromptId,
           }
         }),
       });
@@ -845,6 +883,43 @@ export default function Home() {
                   </SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            {/* Prompt Type Selector */}
+            <div className="space-y-2">
+              <label htmlFor="prompt-type" className="text-sm font-medium text-black">
+                Clip Style
+              </label>
+              <Select
+                value={selectedPromptId}
+                onValueChange={setSelectedPromptId}
+                disabled={isLoading || isLoadingPrompts || availablePrompts.length === 0}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder={isLoadingPrompts ? "Loading styles..." : "Select clip style"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {availablePrompts.map((prompt) => (
+                    <SelectItem key={prompt.id} value={prompt.id}>
+                      <div className="flex flex-col items-start">
+                        <span className="font-medium">{prompt.name}</span>
+                        <span className="text-xs text-gray-500">{prompt.description}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                  {availablePrompts.length === 0 && (
+                    <SelectItem value="default">
+                      <div className="flex flex-col items-start">
+                        <span className="font-medium">Social Media Clips</span>
+                        <span className="text-xs text-gray-500">General-purpose clips optimized for social media engagement</span>
+                      </div>
+                    </SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-gray-500">
+                Choose the type of clips you want to generate. This affects how the AI selects segments.
+              </p>
             </div>
 
             {/* Dynamic Input Based on Source Type */}

@@ -11,6 +11,7 @@ import logging
 from ...database import get_db
 from ...services.task_service import TaskService
 from ...services.ai_model_catalog_service import ModelCatalogError
+from ...repositories.prompt_repository import PromptRepository
 from ...workers.job_queue import JobQueue
 from ...workers.progress import ProgressTracker
 from ...config import Config
@@ -516,6 +517,27 @@ async def list_ai_provider_models(
         raise HTTPException(status_code=500, detail=f"Error listing models: {str(e)}")
 
 
+@router.get("/prompts")
+async def list_prompts(request: Request):
+    """Get all available prompt templates for clip generation."""
+    user_id = request.headers.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User authentication required")
+
+    try:
+        prompts = PromptRepository.get_prompt_choices()
+        default_prompt = PromptRepository.get_default_prompt()
+
+        return {
+            "prompts": prompts,
+            "default_prompt_id": default_prompt.id,
+            "total": len(prompts),
+        }
+    except Exception as e:
+        logger.error(f"Error listing prompts: {e}")
+        raise HTTPException(status_code=500, detail=f"Error listing prompts: {str(e)}")
+
+
 @router.post("/")
 async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
     """
@@ -584,6 +606,17 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
     else:
         raise HTTPException(status_code=400, detail="ai_options.model must be a string")
 
+    # Extract and validate prompt_id
+    prompt_id_raw = ai_options.get("prompt_id")
+    prompt_id = None
+    if prompt_id_raw is not None:
+        if isinstance(prompt_id_raw, str):
+            prompt_id = prompt_id_raw.strip() or None
+            if prompt_id and not PromptRepository.validate_prompt_id(prompt_id):
+                raise HTTPException(status_code=400, detail=f"Invalid prompt_id: {prompt_id}")
+        else:
+            raise HTTPException(status_code=400, detail="ai_options.prompt_id must be a string")
+
     if not raw_source or not raw_source.get("url"):
         raise HTTPException(status_code=400, detail="Source URL is required")
 
@@ -625,6 +658,7 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
             transcription_provider=transcription_provider,
             ai_provider=ai_provider,
             transcript_review_enabled=transcript_review_enabled,
+            prompt_id=prompt_id,
         )
 
         # Get source type for worker
@@ -658,6 +692,7 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
                     resolved_zai_routing_mode,
                     transcription_runtime_options,
                     transcript_review_enabled,  # Pass the flag
+                    prompt_id,  # Pass the selected prompt
                     queue_name=queue_name,
                 )
             else:
@@ -678,6 +713,7 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
                     subtitle_style,
                     resolved_zai_routing_mode,
                     transcription_runtime_options,
+                    prompt_id,  # Pass the selected prompt
                     queue_name=queue_name,
                 )
         except Exception as enqueue_error:
@@ -699,6 +735,7 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
             "transcription_options": transcription_runtime_options,
             "ai_provider": ai_provider,
             "ai_routing_mode": resolved_zai_routing_mode,
+            "prompt_id": prompt_id,
             "message": "Task created and queued for processing"
         }
 

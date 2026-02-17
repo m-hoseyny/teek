@@ -377,17 +377,19 @@ class VideoService:
         ai_provider: str = "openai",
         ai_api_key: Optional[str] = None,
         ai_model: Optional[str] = None,
+        prompt_id: Optional[str] = None,
     ) -> Any:
         """
         Analyze transcript with AI to find relevant segments.
         This is already async, no need to wrap.
         """
-        logger.info("Starting AI analysis of transcript")
+        logger.info(f"Starting AI analysis of transcript with prompt_id={prompt_id}")
         relevant_parts = await get_most_relevant_parts_by_transcript(
             transcript,
             ai_provider=ai_provider,
             ai_api_key=ai_api_key,
             ai_model=ai_model,
+            prompt_id=prompt_id,
         )
         logger.info(f"AI analysis complete: {len(relevant_parts.most_relevant_segments)} segments found")
         return relevant_parts
@@ -399,6 +401,7 @@ class VideoService:
         ai_api_key: Optional[str] = None,
         ai_model: Optional[str] = None,
         progress_callback: Optional[callable] = None,
+        prompt_id: Optional[str] = None,
     ) -> Any:
         """
         Analyze transcript and emit heartbeat progress while waiting for the LLM call.
@@ -438,6 +441,7 @@ class VideoService:
                 ai_provider=ai_provider,
                 ai_api_key=ai_api_key,
                 ai_model=ai_model,
+                prompt_id=prompt_id,
             )
         finally:
             stop_heartbeat.set()
@@ -569,6 +573,7 @@ class VideoService:
         transcription_options: Optional[Dict[str, Any]] = None,
         progress_callback: Optional[callable] = None,
         cancel_check: Optional[Callable[[], Awaitable[None]]] = None,
+        prompt_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Complete video processing pipeline.
@@ -676,6 +681,7 @@ class VideoService:
                     ai_api_key=key_candidate,
                     ai_model=ai_model,
                     progress_callback=progress_callback,
+                    prompt_id=prompt_id,
                 )
                 diagnostics = getattr(relevant_parts, "diagnostics", {}) or {}
                 error_text = diagnostics.get("error")

@@ -65,6 +65,7 @@ async def transcribe_video_task(
     ai_routing_mode: Optional[str] = None,
     transcription_options: Optional[Dict[str, Any]] = None,
     transcript_review_enabled: bool = False,
+    prompt_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Background worker task to download video and transcribe it.
@@ -78,6 +79,7 @@ async def transcribe_video_task(
         source_type: "youtube", "video_url", or "uploaded_file"
         user_id: User ID who created the task
         transcript_review_enabled: If True, pause after transcription for user review
+        prompt_id: Prompt template ID for AI clip selection
         Other args: Same as process_video_task
 
     Returns:
@@ -277,6 +279,7 @@ async def transcribe_video_task(
                 transcript,
                 ai_provider=selected_ai_provider,
                 ai_api_key=ai_api_key,
+                prompt_id=prompt_id,
             )
 
             segments = [
@@ -383,6 +386,7 @@ async def process_video_task(
     subtitle_style: Optional[Dict[str, Any]] = None,
     ai_routing_mode: Optional[str] = None,
     transcription_options: Optional[Dict[str, Any]] = None,
+    prompt_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Background worker task to process a video.
@@ -403,6 +407,7 @@ async def process_video_task(
         subtitle_style: Extra subtitle style controls for rendering
         ai_routing_mode: Optional z.ai key routing mode ("auto", "subscription", "metered")
         transcription_options: Optional local transcription overrides and task timeout
+        prompt_id: Prompt template ID for AI clip selection
 
     Returns:
         Dict with processing results
@@ -459,6 +464,7 @@ async def process_video_task(
                 progress_callback=update_progress,
                 cancel_check=ensure_not_cancelled,
                 user_id=user_id,
+                prompt_id=prompt_id,
             )
             try:
                 result = await asyncio.wait_for(result_coro, timeout=task_timeout_seconds)

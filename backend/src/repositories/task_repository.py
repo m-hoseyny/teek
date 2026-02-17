@@ -6,6 +6,7 @@ from sqlalchemy import text
 from typing import Optional, Dict, Any, List
 import logging
 import uuid
+import json
 
 logger = logging.getLogger(__name__)
 LLM_PROVIDER_COLUMNS = {
@@ -33,8 +34,12 @@ class TaskRepository:
         transcription_provider: str = "local",
         ai_provider: str = "openai",
         transcript_review_enabled: bool = False,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Create a new task and return its ID."""
+        # Convert metadata dict to JSON string if provided
+        metadata_json = json.dumps(metadata) if metadata else None
+        
         result = await db.execute(
             text("""
                 INSERT INTO tasks (
@@ -47,6 +52,7 @@ class TaskRepository:
                     transcription_provider,
                     ai_provider,
                     transcript_review_enabled,
+                    metadata,
                     created_at,
                     updated_at
                 )
@@ -60,6 +66,7 @@ class TaskRepository:
                     :transcription_provider,
                     :ai_provider,
                     :transcript_review_enabled,
+                    :metadata,
                     NOW(),
                     NOW()
                 )
@@ -75,6 +82,7 @@ class TaskRepository:
                 "transcription_provider": transcription_provider,
                 "ai_provider": ai_provider,
                 "transcript_review_enabled": transcript_review_enabled,
+                "metadata": metadata_json,
             }
         )
         await db.commit()
