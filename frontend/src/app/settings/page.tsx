@@ -926,8 +926,8 @@ function SettingsPageContent() {
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex justify-between items-center">
             <Link href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity cursor-pointer">
-              <Image src="/brand/logo.png" alt="MrglSnips logo" width={96} height={96} className="h-24 w-24 object-contain" />
-              <h1 className="text-xl font-bold text-black">MrglSnips</h1>
+              <Image src="/brand/logo.png" alt="Teek logo" width={96} height={96} className="h-24 w-24 object-contain" />
+              <h1 className="text-xl font-bold text-black">Teek</h1>
             </Link>
 
             <div className="flex items-center gap-3">

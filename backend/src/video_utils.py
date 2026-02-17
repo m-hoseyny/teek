@@ -156,7 +156,7 @@ def _download_file(url: str, destination: Path) -> None:
     if temp_path.exists():
         temp_path.unlink()
     try:
-        request = urllib.request.Request(url, headers={"User-Agent": "mrglsnips/1.0"})
+        request = urllib.request.Request(url, headers={"User-Agent": "Teek/1.0"})
         with urllib.request.urlopen(request, timeout=60) as response, temp_path.open("wb") as target:
             while True:
                 chunk = response.read(1024 * 1024)

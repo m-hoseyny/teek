@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# MrglSnips - Quick Start Script
-# This script helps you start MrglSnips with a single command
+# Teek - Quick Start Script
+# This script helps you start Teek with a single command
 
 set -e  # Exit on error
 
@@ -12,7 +12,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 echo "============================================"
-echo "  MrglSnips - AI Video Clipping Tool"
+echo "  Teek - AI Video Clipping Tool"
 echo "============================================"
 echo ""
 
@@ -85,7 +85,7 @@ if [[ "${ENABLE_MULTI_WORKER,,}" =~ ^(1|true|yes|on)$ ]]; then
     COMPOSE_ARGS+=(--profile multi-worker)
 fi
 
-echo -e "${GREEN}Starting MrglSnips...${NC}"
+echo -e "${GREEN}Starting Teek...${NC}"
 if [[ "${ENABLE_MULTI_WORKER,,}" =~ ^(1|true|yes|on)$ ]]; then
     echo "Multi-worker profile enabled (worker + worker2)."
 fi
@@ -99,7 +99,7 @@ echo ""
 $DOCKER_COMPOSE "${COMPOSE_ARGS[@]}" up -d --build
 
 echo ""
-echo -e "${GREEN}MrglSnips is starting up!${NC}"
+echo -e "${GREEN}Teek is starting up!${NC}"
 echo ""
 echo "Services will be available at:"
 echo "  - Frontend:  ${FRONTEND_ORIGIN}"

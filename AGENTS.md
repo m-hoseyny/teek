@@ -4,7 +4,7 @@ This file is the canonical guide for AI coding agents working in this repository
 
 ## Purpose
 
-MrglSnips is a monorepo with two apps:
+Teek is a monorepo with two apps:
 - `backend/` (FastAPI, video processing, AI clip selection)
 - `frontend/` (Next.js main app)
 

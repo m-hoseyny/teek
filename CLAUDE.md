@@ -5,7 +5,7 @@ The canonical cross-agent guide is `AGENTS.md`; keep this file aligned for Claud
 
 ## Project Overview
 
-MrglSnips is an open-source alternative to OpusClip - an AI-powered video clipping tool that transforms long-form content into viral short clips. The project consists of two main applications:
+Teek is an open-source alternative to OpusClip - an AI-powered video clipping tool that transforms long-form content into viral short clips. The project consists of two main applications:
 
 1. **Backend** (Python/FastAPI) - Video processing, AI analysis, and API
 2. **Frontend** (Next.js 15) - Main application interface

@@ -1,6 +1,6 @@
-# MrglSnips Quick Start Guide
+# Teek Quick Start Guide
 
-Run MrglSnips with Docker in just one command!
+Run Teek with Docker in just one command!
 
 ## Prerequisites
 
@@ -62,7 +62,7 @@ TRANSCRIPTION_PROVIDER=local
 # ADMIN_API_KEY=your_strong_random_admin_key
 ```
 
-### 2. Start MrglSnips
+### 2. Start Teek
 
 ```bash
 ./start.sh
@@ -219,7 +219,7 @@ docker-compose up -d
 
 ## Architecture
 
-MrglSnips runs 6 Docker containers by default:
+Teek runs 6 Docker containers by default:
 
 1. **Frontend** (Next.js 15) - Port 3000
 2. **Backend** (FastAPI + Python) - Port 8000

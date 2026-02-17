@@ -43,7 +43,7 @@ config = Config()
 async def lifespan(app: FastAPI):
     """Application lifespan: startup and shutdown events."""
     # Startup
-    logger.info("🚀 Starting MrglSnips API...")
+    logger.info("🚀 Starting Teek API...")
     try:
         await init_db()
         logger.info("✅ Database initialized")
@@ -56,7 +56,7 @@ async def lifespan(app: FastAPI):
 
     finally:
         # Shutdown
-        logger.info("🛑 Shutting down MrglSnips API...")
+        logger.info("🛑 Shutting down Teek API...")
         await close_db()
         await JobQueue.close_pool()
         logger.info("✅ Cleanup complete")
@@ -64,8 +64,8 @@ async def lifespan(app: FastAPI):
 
 # Create FastAPI app
 app = FastAPI(
-    title="MrglSnips API",
-    description="Refactored Python backend for MrglSnips with async job processing",
+    title="Teek API",
+    description="Refactored Python backend for Teek with async job processing",
     version="0.2.0",
     lifespan=lifespan
 )
@@ -96,7 +96,7 @@ app.include_router(media_router)
 def read_root():
     """Root endpoint."""
     return {
-        "name": "MrglSnips API",
+        "name": "Teek API",
         "version": "0.2.0",
         "status": "running",
         "docs": "/docs",

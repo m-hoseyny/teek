@@ -51,8 +51,8 @@ async def lifespan(app: FastAPI):
         await close_db()
 
 app = FastAPI(
-    title="MrglSnips API",
-    description="Python-based backend for MrglSnips",
+    title="Teek API",
+    description="Python-based backend for Teek",
     version="0.1.0",
     lifespan=lifespan
 )
@@ -76,7 +76,7 @@ app.mount("/clips", StaticFiles(directory=str(clips_dir)), name="clips")
 @app.get("/")
 def read_root():
     return {
-        "message": "This is the MrglSnips FastAPI-based API. Visit /docs for the API documentation."
+        "message": "This is the Teek FastAPI-based API. Visit /docs for the API documentation."
     }
 
 @app.get("/health/db")

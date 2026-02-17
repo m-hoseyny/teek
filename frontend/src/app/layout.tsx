@@ -1,10 +1,16 @@
 import type { Metadata } from "next";
+import { Inconsolata } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import ThemeToggle from "@/components/theme-toggle";
 
+const inconsolata = Inconsolata({
+  subsets: ["latin"],
+  variable: "--font-inconsolata",
+});
+
 export const metadata: Metadata = {
-  title: "MrglSnips",
+  title: "Teek",
   description: "Turn long videos into viral-ready shorts.",
 };
 
@@ -14,8 +20,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className="antialiased" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning className={inconsolata.variable}>
+      <body className={`${inconsolata.className} antialiased`} suppressHydrationWarning>
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem storageKey="supoclip-theme">
           {children}
           <ThemeToggle />

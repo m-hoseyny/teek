@@ -1,6 +1,6 @@
 # Configuration Reference
 
-This is the single source of truth for MrglSnips runtime environment variables.
+This is the single source of truth for Teek runtime environment variables.
 
 ## Core Variables
 

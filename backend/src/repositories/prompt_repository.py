@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import logging
 from logging import StreamHandler, Formatter
 
+logger = logging.getLogger(__name__)
 console_handler = StreamHandler()
 console_handler.setFormatter(Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 logger.addHandler(console_handler)

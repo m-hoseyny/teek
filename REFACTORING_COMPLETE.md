@@ -2,7 +2,7 @@
 
 ## Summary
 
-The MrglSnips backend has been **completely refactored** from a monolithic structure to a professional, scalable, layered architecture. This addresses all the performance issues you experienced (task page taking 60+ seconds to show information).
+The Teek backend has been **completely refactored** from a monolithic structure to a professional, scalable, layered architecture. This addresses all the performance issues you experienced (task page taking 60+ seconds to show information).
 
 ## 🚀 What Was Fixed
 

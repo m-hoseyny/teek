@@ -1,4 +1,4 @@
--- Database initialization script for MrglSnips
+-- Database initialization script for Teek
 -- Create database schema with required tables
 
 -- Enable UUID extension for generating UUIDs
