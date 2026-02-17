@@ -123,8 +123,8 @@ SEGMENT SELECTION CRITERIA:
 5. ABSURD/UNEXPECTED: Moments that catch viewers off-guard in a fun way
 
 TIMING GUIDELINES:
-- Segments MUST be between 5-45 seconds for comedic timing
-- CRITICAL: start_time MUST be different from end_time (minimum 5 seconds apart)
+- Segments MUST be between 20-60 seconds for comedic timing
+- CRITICAL: start_time MUST be different from end_time (minimum 20 seconds apart)
 - Respect comedic timing - don't cut off punchlines
 - Include setup if needed for the joke to land
 
@@ -132,7 +132,7 @@ TIMESTAMP REQUIREMENTS - EXTREMELY IMPORTANT:
 - Use EXACT timestamps as they appear in the transcript
 - Never modify timestamp format (keep MM:SS structure)
 - start_time MUST be LESS THAN end_time (start_time < end_time)
-- MINIMUM segment duration: 5 seconds (end_time - start_time >= 5 seconds)
+- MINIMUM segment duration: 20 seconds (end_time - start_time >= 20 seconds)
 - Look at transcript ranges like [02:25 - 02:35] and use different start/end times
 - NEVER use the same timestamp for both start_time and end_time
 - Example: start_time: "02:25", end_time: "02:35" (NOT "02:25" and "02:25")
@@ -237,8 +237,8 @@ SEGMENT SELECTION CRITERIA:
 5. TRENDY TOPICS: Content aligned with current conversations and memes
 
 TIMING GUIDELINES:
-- Segments MUST be between 7-30 seconds for viral optimization
-- CRITICAL: start_time MUST be different from end_time (minimum 7 seconds apart)
+- Segments MUST be between 20-60 seconds for viral optimization
+- CRITICAL: start_time MUST be different from end_time (minimum 20 seconds apart)
 - Front-load the hook - grab attention in first 3 seconds
 - End with share-worthy moments
 
@@ -246,7 +246,7 @@ TIMESTAMP REQUIREMENTS - EXTREMELY IMPORTANT:
 - Use EXACT timestamps as they appear in the transcript
 - Never modify timestamp format (keep MM:SS structure)
 - start_time MUST be LESS THAN end_time (start_time < end_time)
-- MINIMUM segment duration: 7 seconds (end_time - start_time >= 7 seconds)
+- MINIMUM segment duration: 20 seconds (end_time - start_time >= 20 seconds)
 - Look at transcript ranges like [02:25 - 02:35] and use different start/end times
 - NEVER use the same timestamp for both start_time and end_time
 - Example: start_time: "02:25", end_time: "02:35" (NOT "02:25" and "02:25")
