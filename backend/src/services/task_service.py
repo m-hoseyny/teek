@@ -344,6 +344,7 @@ class TaskService:
             result = await self.video_service.process_video_complete(
                 url=url,
                 source_type=source_type,
+                task_id=task_id,
                 font_family=font_family,
                 font_size=font_size,
                 font_color=font_color,

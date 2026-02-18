@@ -143,7 +143,7 @@ async def transcribe_video_task(
             if source_type == "youtube":
                 video_path = await VideoService.download_video(url, progress_callback=update_progress)
             elif source_type == "video_url":
-                video_path = await VideoService.download_video_from_url(url, progress_callback=update_progress)
+                video_path = await VideoService.download_video_from_url(url, task_id=task_id, progress_callback=update_progress)
             else:  # uploaded_file
                 video_path = VideoService.validate_uploaded_video_path(url)
 

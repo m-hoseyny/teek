@@ -43,7 +43,7 @@ class VideoService:
         return any(marker in normalized for marker in retry_markers)
 
     @staticmethod
-    async def download_video_from_url(url: str, progress_callback: Optional[callable] = None) -> Optional[Path]:
+    async def download_video_from_url(url: str, task_id: Optional[str] = None, progress_callback: Optional[callable] = None) -> Optional[Path]:
         """
         Download a video from a generic URL (non-YouTube).
         Returns the path to the downloaded file.
@@ -52,7 +52,7 @@ class VideoService:
         import urllib.parse
         from pathlib import Path
 
-        logger.info(f"Starting download from URL: {url}")
+        logger.info(f"Starting download from URL: {url} (task_id={task_id})")
 
         try:
             # Parse URL to get filename
@@ -67,10 +67,13 @@ class VideoService:
             downloads_dir = Path(config.temp_dir) / "downloads"
             downloads_dir.mkdir(parents=True, exist_ok=True)
 
-            # Generate unique filename to avoid collisions
+            # Generate unique filename with task_id to avoid collisions across tasks
             import hashlib
             url_hash = hashlib.sha256(url.encode()).hexdigest()[:12]
-            unique_filename = f"{url_hash}_{filename}"
+            if task_id:
+                unique_filename = f"{task_id}_{url_hash}_{filename}"
+            else:
+                unique_filename = f"{url_hash}_{filename}"
             destination = downloads_dir / unique_filename
 
             # Check if already downloaded
@@ -561,6 +564,7 @@ class VideoService:
     async def process_video_complete(
         url: str,
         source_type: str,
+        task_id: Optional[str] = None,
         font_family: str = "TikTokSans-Regular",
         font_size: int = 24,
         font_color: str = "#FFFFFF",
@@ -607,7 +611,7 @@ class VideoService:
                 if not video_path:
                     raise Exception("Failed to download YouTube video")
             elif source_type == "video_url":
-                video_path = await VideoService.download_video_from_url(url, progress_callback=progress_callback)
+                video_path = await VideoService.download_video_from_url(url, task_id=task_id, progress_callback=progress_callback)
                 if not video_path:
                     raise Exception("Failed to download video from URL")
             else:  # uploaded_file
