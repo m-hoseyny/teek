@@ -3,6 +3,7 @@ Worker tasks - background jobs processed by arq workers.
 """
 import asyncio
 import logging
+from pathlib import Path
 from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -600,81 +601,16 @@ async def generate_clips_from_transcript(
             if not source:
                 raise ValueError(f"Source not found for task {task_id}")
 
-            # Determine video path from source
-            from pathlib import Path
+            # Get video path from task metadata (saved during upload/download)
+            task_metadata = task.get("metadata") or {}
+            video_path = task_metadata.get("video_path")
 
-            # For YouTube/video_url sources, find the downloaded video
-            video_path = None
-            source_type = source.get("type")
-            source_url = source.get("url", "")
+            if not video_path:
+                raise ValueError(f"Video path not found in task metadata for task {task_id}")
 
-            logger.info(f"Looking for video file for source type={source_type}, url={source_url}")
-
-            if source_type in ["youtube", "video_url"]:
-                # Look for downloaded video in temp directory
-                temp_dir = Path(config.temp_dir)
-                downloads_dir = temp_dir / "downloads"
-                if downloads_dir.exists():
-                    # Find video files that might match this source
-                    video_files = list(downloads_dir.glob("*.mp4")) + list(downloads_dir.glob("*.mkv")) + list(downloads_dir.glob("*.webm"))
-                    # Use the most recent one as a heuristic
-                    if video_files:
-                        video_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-                        video_path = video_files[0]
-                        logger.info(f"Found downloaded video: {video_path}")
-            elif source_type == "uploaded_file":
-                # For uploaded files, try multiple possible paths
-                possible_paths = []
-
-                # The URL might be a relative path like /uploads/filename.mp4
-                if source_url:
-                    # Try as absolute path first
-                    possible_paths.append(Path(source_url))
-                    # Try relative to temp_dir
-                    possible_paths.append(Path(config.temp_dir) / source_url.lstrip("/"))
-                    # Try in uploads subdirectory
-                    possible_paths.append(Path(config.temp_dir) / "uploads" / Path(source_url).name)
-                    # Try the URL as a direct filename in temp
-                    possible_paths.append(Path(config.temp_dir) / Path(source_url).name)
-
-                # Also check if there's a video file referenced in task metadata
-                task_metadata = task.get("metadata") or {}
-                if task_metadata.get("video_path"):
-                    possible_paths.append(Path(task_metadata["video_path"]))
-
-                # Find the first existing path
-                for path in possible_paths:
-                    logger.info(f"Checking path: {path} (exists: {path.exists()})")
-                    if path.exists():
-                        video_path = path
-                        logger.info(f"Found uploaded video at: {video_path}")
-                        break
-
-                # If still not found, search in temp directory for recent uploads
-                if not video_path:
-                    temp_dir = Path(config.temp_dir)
-                    uploads_dir = temp_dir / "uploads"
-                    if uploads_dir.exists():
-                        video_files = list(uploads_dir.glob("*.mp4")) + list(uploads_dir.glob("*.mov")) + list(uploads_dir.glob("*.avi")) + list(uploads_dir.glob("*.mkv")) + list(uploads_dir.glob("*.webm"))
-                        if video_files:
-                            # Sort by modification time, most recent first
-                            video_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-                            # Try to match by filename from source_url
-                            source_filename = Path(source_url).name if source_url else None
-                            if source_filename:
-                                for vf in video_files:
-                                    if vf.name == source_filename or vf.stem in source_filename:
-                                        video_path = vf
-                                        logger.info(f"Found uploaded video by filename match: {video_path}")
-                                        break
-                            # If no match, use most recent
-                            if not video_path:
-                                video_path = video_files[0]
-                                logger.info(f"Using most recent uploaded video: {video_path}")
-
-            if not video_path or not video_path.exists():
-                logger.error(f"Video file not found. Checked paths: {[str(p) for p in possible_paths if 'possible_paths' in locals()]}")
-                raise ValueError(f"Video file not found for source type={source_type}, url={source_url}")
+            video_path = Path(video_path)
+            if not video_path.exists():
+                raise ValueError(f"Video file not found at path: {video_path}")
 
             # Check usage limits before generating clips
             subscription_service = SubscriptionService(db)

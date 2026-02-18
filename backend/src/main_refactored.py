@@ -20,6 +20,10 @@ from .config import Config
 from .database import init_db, close_db, get_db
 from .workers.job_queue import JobQueue
 from .api.routes import tasks
+from .api.routes import settings
+from .api.routes import subscriptions
+from .api.routes import tasks_clips
+from .api.routes import tasks_transcripts
 
 # Ensure the log directory exists before configuring file logging.
 log_dir = Path("logs")
@@ -84,8 +88,12 @@ clips_dir = Path(config.temp_dir) / "clips"
 clips_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/clips", StaticFiles(directory=str(clips_dir)), name="clips")
 
-# Include routers
+# Include routers - settings first to avoid shadowing by tasks/{task_id} catch-all
+app.include_router(settings.router)
 app.include_router(tasks.router)
+app.include_router(subscriptions.router)
+app.include_router(tasks_clips.router)
+app.include_router(tasks_transcripts.router)
 
 # Keep existing utility endpoints
 from .api.routes.media import router as media_router
