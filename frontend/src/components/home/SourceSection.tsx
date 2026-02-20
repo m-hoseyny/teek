@@ -191,6 +191,7 @@ export function SourceSection({
             className="h-11"
           />
           <p className="text-xs text-gray-500">Direct link to video file (MP4, MOV, MKV, etc.)</p>
+          <p className="text-xs text-amber-600 font-medium">⚠ YouTube URLs are not supported</p>
         </div>
       )}
 

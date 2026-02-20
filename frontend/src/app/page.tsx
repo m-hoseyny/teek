@@ -60,6 +60,8 @@ export default function Home() {
   // User plan state
   const [userPlan, setUserPlan] = useState<string | null>(null);
   const [useAiTranscription, setUseAiTranscription] = useState(false);
+  const [clipsCount, setClipsCount] = useState(5);
+  const [transcriptReviewEnabled, setTranscriptReviewEnabled] = useState(true);
 
   // Task timeout cap
   const [taskTimeoutCapSeconds, setTaskTimeoutCapSeconds] = useState(MAX_TASK_TIMEOUT_SECONDS);
@@ -280,7 +282,7 @@ export default function Home() {
             shadow_offset_x: preferences.shadowOffsetX,
             shadow_offset_y: preferences.shadowOffsetY,
             transitions_enabled: preferences.transitionsEnabled,
-            transcript_review_enabled: true, // Always enable by default
+            transcript_review_enabled: transcriptReviewEnabled,
           },
           transcription_options: {
             provider: preferences.transcriptionProvider,
@@ -294,7 +296,7 @@ export default function Home() {
             provider: preferences.aiProvider,
             model: preferences.aiModel.trim() || DEFAULT_AI_MODELS[preferences.aiProvider],
             prompt_id: selectedPromptId,
-            clips_count: 5, // Default clips count
+            clips_count: clipsCount,
           },
         }),
       });
@@ -417,13 +419,13 @@ export default function Home() {
 
             {/* SECTION 2: Clip Settings */}
             <ClipSettingsSection
-              clipsCount={5}
-              setClipsCount={() => {}}
+              clipsCount={clipsCount}
+              setClipsCount={setClipsCount}
               selectedPromptId={selectedPromptId}
               setSelectedPromptId={setSelectedPromptId}
               availablePrompts={prompts}
-              transcriptReviewEnabled={true}
-              setTranscriptReviewEnabled={() => {}}
+              transcriptReviewEnabled={transcriptReviewEnabled}
+              setTranscriptReviewEnabled={setTranscriptReviewEnabled}
               isLoadingPrompts={isLoadingPrompts}
               isLoading={isLoading}
             />
