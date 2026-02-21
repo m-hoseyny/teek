@@ -131,8 +131,8 @@ async def transcribe_video_task(
                 else:
                     assembly_api_key = config.assembly_ai_api_key
 
-            # Download video
-            await update_progress(10, "Downloading video...")
+            # Step 1: Uploading Video
+            await update_progress(5, "Uploading Video...", metadata={"step": 1, "step_name": "upload"})
             from pathlib import Path
 
             temp_dir = Path(config.temp_dir)
@@ -177,9 +177,9 @@ async def transcribe_video_task(
             if srt_content and srt_content.strip():
                 effective_provider = "srt"
                 logger.info(f"User-provided SRT content detected, skipping AI transcription")
-                await update_progress(30, "Processing user-provided subtitles...")
+                await update_progress(30, "Extracting Audio...", metadata={"step": 2, "step_name": "extract_audio"})
             else:
-                await update_progress(30, "Video downloaded. Starting AI transcription...")
+                await update_progress(30, "Extracting Audio...", metadata={"step": 2, "step_name": "extract_audio"})
 
             # Transcribe video or use provided SRT content
             from ..video_utils import get_video_transcript
@@ -208,11 +208,11 @@ async def transcribe_video_task(
                 except Exception as deduct_error:
                     logger.warning(f"Failed to deduct transcription minutes: {deduct_error}")
 
-            await update_progress(50, "Transcription complete!")
+            await update_progress(50, "Generating AI Transcript...", metadata={"step": 3, "step_name": "transcription"})
 
             # If review is enabled, run AI analysis first, create clip records, then pause
             if transcript_review_enabled:
-                await update_progress(55, "Analyzing transcript with AI...")
+                await update_progress(55, "Identifying Viral Moments...", metadata={"step": 4, "step_name": "virality_analysis"})
 
                 selected_ai_provider = (ai_provider or "openai").strip().lower()
                 ai_key_attempts, _ = await task_service.get_effective_user_ai_api_key_attempts(
@@ -252,7 +252,7 @@ async def transcribe_video_task(
                     await progress.complete()
                     return {"task_id": task_id, "clips_created": 0, "message": "No valid segments found"}
 
-                await update_progress(70, f"Creating {len(segments)} clip records for review...")
+                await update_progress(70, f"Identifying Viral Moments: Creating clip records...", metadata={"step": 4, "step_name": "virality_analysis"})
 
                 # Create clip records in DB (without video files yet)
                 clip_ids = []
@@ -295,7 +295,7 @@ async def transcribe_video_task(
                 }
 
             # If review is NOT enabled, continue with full processing
-            await update_progress(55, "Analyzing transcript with AI...")
+            await update_progress(55, "Identifying Viral Moments...", metadata={"step": 4, "step_name": "virality_analysis"})
 
             selected_ai_provider = (ai_provider or "openai").strip().lower()
             ai_key_attempts, _ = await task_service.get_effective_user_ai_api_key_attempts(
@@ -335,7 +335,7 @@ async def transcribe_video_task(
                 await progress.complete()
                 return {"task_id": task_id, "clips_created": 0, "message": "No valid segments found"}
 
-            await update_progress(70, f"Creating {len(segments)} video clips...")
+            await update_progress(70, f"Identifying Viral Moments: Creating video clips...", metadata={"step": 4, "step_name": "virality_analysis"})
 
             # Create clips WITHOUT subtitles (subtitles are added on-demand during export)
             clips_result = await VideoService.create_video_clips(
@@ -347,7 +347,7 @@ async def transcribe_video_task(
             )
 
             # Save clips to database with word-level timing data
-            await update_progress(95, "Saving clips...")
+            await update_progress(95, "Identifying Viral Moments: Saving clips...", metadata={"step": 4, "step_name": "virality_analysis"})
 
             import json as _json
             clip_ids = []
@@ -621,7 +621,7 @@ async def generate_clips_from_transcript(
                 await progress.error(str(e))
                 return {"task_id": task_id, "error": str(e), "limit_exceeded": True}
 
-            await progress.update(50, f"Generating {len(clips)} video clips with edited subtitles...")
+            await progress.update(50, f"Identifying Viral Moments: Generating video clips...", metadata={"step": 4, "step_name": "virality_analysis"})
 
             # Build segments from clips (using edited text)
             segments = [
@@ -647,7 +647,7 @@ async def generate_clips_from_transcript(
             )
 
             # Update clip records with actual file paths, durations, and word-level data
-            await progress.update(95, "Saving clip files...")
+            await progress.update(95, "Identifying Viral Moments: Saving clip files...", metadata={"step": 4, "step_name": "virality_analysis"})
 
             import json as _json
             for i, clip_info in enumerate(clips_result["clips"]):
@@ -746,7 +746,7 @@ async def retry_clips_analysis(
 
             ai_provider = task.get("ai_provider", "openai")
 
-            await update_progress(55, "Analyzing transcript with AI for new clips...")
+            await update_progress(55, "Identifying Viral Moments...", metadata={"step": 4, "step_name": "virality_analysis"})
 
             # Get AI API key
             ai_key_attempts, _ = await task_service.get_effective_user_ai_api_key_attempts(
@@ -805,7 +805,7 @@ async def retry_clips_analysis(
                 await progress.error(str(e))
                 return {"task_id": task_id, "error": str(e), "limit_exceeded": True}
 
-            await update_progress(70, f"Creating {len(segments)} new clip records for review...")
+            await update_progress(70, f"Identifying Viral Moments: Creating clip records...", metadata={"step": 4, "step_name": "virality_analysis"})
 
             # Create clip records in DB (without video files yet)
             clip_ids = []

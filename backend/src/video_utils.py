@@ -939,6 +939,73 @@ def detect_optimal_crop_region(video_clip: VideoFileClip, start_time: float, end
 
         return (x_offset, y_offset, new_width, new_height)
 
+
+def crop_clip_to_ratio(
+    input_path: Union[Path, str],
+    output_path: Union[Path, str],
+    target_ratio: float,
+    start_time: float = 0,
+    end_time: Optional[float] = None
+) -> bool:
+    """Crop video to target aspect ratio using face detection.
+
+    Args:
+        input_path: Path to input video file
+        output_path: Path for output cropped video
+        target_ratio: Target aspect ratio (e.g., 9/16, 1.0, 16/9)
+        start_time: Start time for the clip (default: 0)
+        end_time: End time for the clip (default: video duration)
+
+    Returns:
+        True on success, False on failure
+    """
+    try:
+        input_path = Path(input_path)
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        video = VideoFileClip(str(input_path))
+        if end_time is None:
+            end_time = video.duration
+
+        if start_time >= video.duration:
+            logger.error(f"Start time {start_time}s exceeds video duration {video.duration:.1f}s")
+            video.close()
+            return False
+
+        end_time = min(end_time, video.duration)
+
+        x_offset, y_offset, new_width, new_height = detect_optimal_crop_region(
+            video, start_time, end_time, target_ratio
+        )
+
+        clip = video.subclipped(start_time, end_time)
+        cropped = clip.cropped(
+            x1=x_offset, y1=y_offset,
+            x2=x_offset + new_width, y2=y_offset + new_height
+        )
+
+        encoding_settings = {
+            'codec': 'libx264',
+            'audio_codec': 'aac',
+            'bitrate': '8M',
+            'preset': 'medium',
+            'fps': 30,
+        }
+        cropped.write_videofile(str(output_path), logger=None, **encoding_settings)
+
+        video.close()
+        clip.close()
+        cropped.close()
+
+        logger.info(f"Successfully cropped video to ratio {target_ratio:.2f}: {output_path}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to crop clip to ratio {target_ratio}: {e}")
+        return False
+
+
 def detect_faces_in_clip(video_clip: VideoFileClip, start_time: float, end_time: float) -> List[Tuple[int, int, int, float]]:
     """
     Improved face detection using multiple methods and temporal consistency.

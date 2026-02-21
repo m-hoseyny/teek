@@ -437,6 +437,11 @@ async def render_clip(
     except Exception:
         data = {}
 
+    # Parse aspect_ratio from request body
+    aspect_ratio = data.get("aspect_ratio")
+    RATIO_MAP = {"9:16": 9/16, "1:1": 1.0, "16:9": 16/9}
+    target_ratio = RATIO_MAP.get(aspect_ratio) if aspect_ratio else None
+
     try:
         task_service = TaskService(db)
 
@@ -495,14 +500,33 @@ async def render_clip(
 
         pycaps_transcript = {"segments": [{"words": pycaps_words}]}
 
-        # Generate output path
-        rendered_filename = f"rendered_{clip_id}_{template}.mp4"
+        # Crop clip to target aspect ratio if specified
+        input_for_rendering = raw_clip_path
+        if target_ratio:
+            cropped_filename = f"cropped_{clip_id}_{aspect_ratio.replace(':', '')}.mp4"
+            cropped_path = Path(config.temp_dir) / "clips" / cropped_filename
+            
+            from ...utils.async_helpers import run_in_thread
+            from ...video_utils import crop_clip_to_ratio
+            
+            clip_duration = clip_data.get("duration", 0)
+            crop_success = await run_in_thread(
+                crop_clip_to_ratio, raw_clip_path, cropped_path, target_ratio, 0, clip_duration
+            )
+            
+            if not crop_success:
+                raise HTTPException(status_code=500, detail="Failed to crop clip to target aspect ratio")
+            
+            input_for_rendering = cropped_path
+            rendered_filename = f"rendered_{clip_id}_{template}_{aspect_ratio.replace(':', '')}.mp4"
+        else:
+            rendered_filename = f"rendered_{clip_id}_{template}.mp4"
         rendered_path = Path(config.temp_dir) / "clips" / rendered_filename
 
         # Run pycaps rendering in a thread
         from ...utils.async_helpers import run_in_thread
         success = await run_in_thread(
-            render_pycaps_subtitles, raw_clip_path, rendered_path, pycaps_transcript, template, caption_options
+            render_pycaps_subtitles, input_for_rendering, rendered_path, pycaps_transcript, template, caption_options
         )
 
         if not success:
