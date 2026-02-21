@@ -15,7 +15,7 @@ from ...repositories.prompt_repository import PromptRepository
 from ...workers.job_queue import JobQueue
 from ...workers.progress import ProgressTracker
 from ...config import Config
-from ...subtitle_style import normalize_subtitle_style
+from ...pycaps_renderer import AVAILABLE_TEMPLATES as PYCAPS_AVAILABLE_TEMPLATES, DEFAULT_TEMPLATE as PYCAPS_DEFAULT_TEMPLATE
 from .utils import (
     _require_user_id,
     _require_admin_access,
@@ -104,16 +104,14 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
     raw_source = data.get("source")
     user_id = headers.get("user_id")
 
-    # Get and normalize subtitle options
-    font_options = data.get("font_options", {})
-    if not isinstance(font_options, dict):
-        font_options = {}
-    subtitle_style = normalize_subtitle_style(font_options)
-    font_family = subtitle_style["font_family"]
-    font_size = subtitle_style["font_size"]
-    font_color = subtitle_style["font_color"]
-    transitions_enabled = _coerce_bool(font_options.get("transitions_enabled"), default=False)
-    transcript_review_enabled = _coerce_bool(font_options.get("transcript_review_enabled"), default=False)
+    # Get pycaps options from caption_options (or legacy font_options for backwards compat)
+    caption_options = data.get("caption_options") or data.get("font_options") or {}
+    if not isinstance(caption_options, dict):
+        caption_options = {}
+    raw_template = caption_options.get("pycaps_template", PYCAPS_DEFAULT_TEMPLATE)
+    pycaps_template = raw_template if raw_template in PYCAPS_AVAILABLE_TEMPLATES else PYCAPS_DEFAULT_TEMPLATE
+    transitions_enabled = _coerce_bool(caption_options.get("transitions_enabled"), default=False)
+    transcript_review_enabled = _coerce_bool(caption_options.get("transcript_review_enabled"), default=False)
 
     # Resolve transcription options
     transcription_options = data.get("transcription_options", {})
@@ -191,9 +189,7 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
             user_id=user_id,
             url=raw_source["url"],
             title=raw_source.get("title"),
-            font_family=font_family,
-            font_size=font_size,
-            font_color=font_color,
+            pycaps_template=pycaps_template,
             transcription_provider=transcription_provider,
             ai_provider=ai_options.provider,
             transcript_review_enabled=transcript_review_enabled,
@@ -212,20 +208,17 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
 
         # Enqueue job for worker
         try:
-            # Build common args (14 positional args shared by both workers)
+            # Build common args shared by both worker entry points
             common_args = [
                 task_id,
                 raw_source["url"],
                 source_type,
                 user_id,
-                font_family,
-                font_size,
-                font_color,
+                pycaps_template,
                 transitions_enabled,
                 transcription_provider,
                 ai_options.provider,
                 ai_options.model,
-                subtitle_style,
                 resolved_zai_routing_mode,
                 transcription_runtime_options,
             ]
@@ -468,6 +461,114 @@ async def update_task(task_id: str, request: Request, db: AsyncSession = Depends
     except Exception as e:
         logger.error(f"Error updating task: {e}")
         raise HTTPException(status_code=500, detail=f"Error updating task: {str(e)}")
+
+
+@router.post("/{task_id}/retry")
+async def retry_task(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """
+    Retry a failed task.
+    Re-enqueues the task for processing with the same parameters.
+    """
+    user_id = request.headers.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User authentication required")
+
+    try:
+        task_service = TaskService(db)
+        task = await task_service.task_repo.get_task_by_id(db, task_id)
+
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to access this task")
+
+        # Only allow retry from error status
+        if task.get("status") != "error":
+            raise HTTPException(status_code=400, detail="Task can only be retried from error status")
+
+        # Get source URL for retry
+        source_type = task.get("source_type")
+        if not source_type:
+            raise HTTPException(status_code=400, detail="Source type not found for retry")
+
+        # Get video path from metadata or source
+        metadata = task.get("metadata") or {}
+        video_path = metadata.get("video_path")
+        if not video_path:
+            raise HTTPException(status_code=400, detail="Video path not found for retry - cannot retry this task")
+
+        # Extract task parameters from stored fields and metadata
+        task_metadata = task.get("metadata") or {}
+        pycaps_template = task_metadata.get("pycaps_template", "word-focus")
+        transitions_enabled = task_metadata.get("transitions_enabled", False)
+        transcription_provider = task.get("transcription_provider", "local")
+        ai_provider = task.get("ai_provider", "openai")
+        ai_model = task_metadata.get("ai_model")
+        ai_routing_mode = task_metadata.get("ai_routing_mode")
+        prompt_id = task_metadata.get("prompt_id")
+        clips_count = task_metadata.get("clips_count")
+        transcription_options = task_metadata.get("transcription_options")
+
+        # Delete existing clips from previous attempt
+        await task_service.clip_repo.delete_clips_by_task(db, task_id)
+
+        # Reset task status to queued for retry
+        await task_service.task_repo.update_task_status(
+            db, task_id, "queued", progress=0, progress_message="Task queued for retry"
+        )
+
+        # Build common args for worker
+        common_args = [
+            task_id,
+            video_path,
+            source_type,
+            user_id,
+            pycaps_template,
+            transitions_enabled,
+            transcription_provider,
+            ai_provider,
+            ai_model,
+            ai_routing_mode,
+            transcription_options,
+        ]
+
+        queue_name = (
+            config.arq_assembly_queue_name
+            if transcription_provider == "assemblyai"
+            else config.arq_local_queue_name
+        )
+
+        # Enqueue job for worker
+        transcript_review_enabled = task.get("transcript_review_enabled", False)
+        if transcript_review_enabled:
+            job_id = await JobQueue.enqueue_job(
+                "transcribe_video_task",
+                *common_args,
+                True,  # transcript_review_enabled
+                prompt_id,
+                clips_count,
+                queue_name=queue_name,
+            )
+        else:
+            job_id = await JobQueue.enqueue_job(
+                "process_video_task",
+                *common_args,
+                prompt_id,
+                clips_count,
+                queue_name=queue_name,
+            )
+
+        return {
+            "message": "Task retry started",
+            "task_id": task_id,
+            "job_id": job_id,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error starting task retry: {e}")
+        raise HTTPException(status_code=500, detail=f"Error starting task retry: {str(e)}")
 
 
 @router.delete("/{task_id}")

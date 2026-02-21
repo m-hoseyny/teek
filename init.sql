@@ -32,6 +32,19 @@ CREATE TABLE users (
     default_shadow_blur INTEGER DEFAULT 2,
     default_shadow_offset_x INTEGER DEFAULT 0,
     default_shadow_offset_y INTEGER DEFAULT 2,
+    -- PyCaps caption template preference
+    default_pycaps_template VARCHAR(50) DEFAULT 'word-focus',
+    default_transitions_enabled BOOLEAN DEFAULT false,
+    -- Transcription & processing preferences
+    default_transcription_provider VARCHAR(20) DEFAULT 'local',
+    default_whisper_chunking_enabled BOOLEAN DEFAULT true,
+    default_whisper_chunk_duration_seconds INTEGER DEFAULT 1200,
+    default_whisper_chunk_overlap_seconds INTEGER DEFAULT 8,
+    default_task_timeout_seconds INTEGER DEFAULT 21600,
+    -- AI preferences
+    default_ai_provider VARCHAR(20) DEFAULT 'openai',
+    default_ai_model VARCHAR(100),
+    default_zai_key_routing_mode VARCHAR(20) DEFAULT 'auto',
     -- Optional user-managed API secret (encrypted)
     assembly_api_key_encrypted TEXT,
     openai_api_key_encrypted TEXT,
@@ -67,6 +80,10 @@ CREATE TABLE tasks (
     transcription_provider VARCHAR(20) NOT NULL DEFAULT 'local' CHECK (transcription_provider IN ('local', 'assemblyai')),
     ai_provider VARCHAR(20) NOT NULL DEFAULT 'openai' CHECK (ai_provider IN ('openai', 'google', 'anthropic')),
 
+    -- Caption options (task-level defaults)
+    pycaps_template VARCHAR(50) DEFAULT 'word-focus',
+    transitions_enabled BOOLEAN DEFAULT false,
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -84,6 +101,9 @@ CREATE TABLE generated_clips (
     relevance_score FLOAT NOT NULL,
     reasoning TEXT,                  -- AI reasoning for selection
     clip_order INTEGER NOT NULL,     -- Order within the task
+    words_json TEXT,                 -- Word-level timing data JSON for client-side subtitle preview
+    pycaps_template VARCHAR(50) DEFAULT 'word-focus', -- Per-clip caption template
+    rendered_file_path VARCHAR(500), -- Path to final rendered clip with subtitles (null until exported)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );

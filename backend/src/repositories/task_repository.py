@@ -52,7 +52,7 @@ class TaskRepository:
                     transcription_provider,
                     ai_provider,
                     transcript_review_enabled,
-                    metadata,
+                    task_metadata,
                     created_at,
                     updated_at
                 )
@@ -66,7 +66,7 @@ class TaskRepository:
                     :transcription_provider,
                     :ai_provider,
                     :transcript_review_enabled,
-                    :metadata,
+                    :task_metadata,
                     NOW(),
                     NOW()
                 )
@@ -82,7 +82,7 @@ class TaskRepository:
                 "transcription_provider": transcription_provider,
                 "ai_provider": ai_provider,
                 "transcript_review_enabled": transcript_review_enabled,
-                "metadata": metadata_json,
+                "task_metadata": metadata_json,
             }
         )
         await db.commit()
@@ -122,7 +122,7 @@ class TaskRepository:
             "font_color": row.font_color,
             "transcription_provider": getattr(row, "transcription_provider", "local"),
             "ai_provider": getattr(row, "ai_provider", "openai"),
-            "metadata": getattr(row, "metadata", None),
+            "metadata": getattr(row, "task_metadata", None),
             "source_transcript": getattr(row, "source_transcript", None),
             "editable_transcript": getattr(row, "editable_transcript", None),
             "created_at": row.created_at,
@@ -556,7 +556,7 @@ class TaskRepository:
         await db.execute(
             text("""
                 UPDATE tasks
-                SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_object(ARRAY['video_path', :video_path]),
+                SET task_metadata = COALESCE(task_metadata, '{}'::jsonb) || jsonb_object(ARRAY['video_path', :video_path]),
                     updated_at = NOW()
                 WHERE id = :task_id
             """),

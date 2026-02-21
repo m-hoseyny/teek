@@ -102,6 +102,7 @@ class Task(Base):
     transcript_review_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     editable_transcript: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # User-edited transcript before clip generation
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)  # When transcript was reviewed
+    task_metadata: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON metadata for task configuration
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

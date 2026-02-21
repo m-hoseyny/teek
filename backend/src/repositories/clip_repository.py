@@ -1,6 +1,7 @@
 """
 Clip repository - handles all database operations for generated clips.
 """
+from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text as sql_text
 from typing import List, Dict, Any
@@ -36,17 +37,21 @@ class ClipRepository:
         text: str,
         relevance_score: float,
         reasoning: str,
-        clip_order: int
+        clip_order: int,
+        words_json: str | None = None,
+        pycaps_template: str | None = None,
     ) -> str:
         """Create a new clip record and return its ID."""
         result = await db.execute(
             sql_text("""
                 INSERT INTO generated_clips
                 (task_id, filename, file_path, start_time, end_time, duration,
-                 text, relevance_score, reasoning, clip_order, created_at)
+                 text, relevance_score, reasoning, clip_order,
+                 words_json, pycaps_template, created_at)
                 VALUES
                 (:task_id, :filename, :file_path, :start_time, :end_time, :duration,
-                 :text, :relevance_score, :reasoning, :clip_order, NOW())
+                 :text, :relevance_score, :reasoning, :clip_order,
+                 :words_json, :pycaps_template, NOW())
                 RETURNING id
             """),
             {
@@ -59,7 +64,9 @@ class ClipRepository:
                 "text": text,
                 "relevance_score": relevance_score,
                 "reasoning": reasoning,
-                "clip_order": clip_order
+                "clip_order": clip_order,
+                "words_json": words_json,
+                "pycaps_template": pycaps_template or "word-focus",
             }
         )
         clip_id = result.scalar()
@@ -72,7 +79,8 @@ class ClipRepository:
         result = await db.execute(
             sql_text("""
                 SELECT id, filename, file_path, start_time, end_time, duration,
-                       text, relevance_score, reasoning, clip_order, created_at
+                       text, relevance_score, reasoning, clip_order, created_at,
+                       words_json, pycaps_template, rendered_file_path
                 FROM generated_clips
                 WHERE task_id = :task_id
                 ORDER BY clip_order ASC
@@ -80,8 +88,17 @@ class ClipRepository:
             {"task_id": task_id}
         )
 
+        import json as _json
         clips = []
         for row in result.fetchall():
+            # Parse words_json back into a list
+            words = []
+            if row.words_json:
+                try:
+                    words = _json.loads(row.words_json)
+                except (ValueError, TypeError):
+                    pass
+
             clips.append({
                 "id": row.id,
                 "filename": row.filename,
@@ -94,7 +111,10 @@ class ClipRepository:
                 "reasoning": row.reasoning,
                 "clip_order": row.clip_order,
                 "created_at": row.created_at.isoformat(),
-                "video_url": f"/clips/{row.filename}"
+                "video_url": f"/clips/{row.filename}",
+                "words": words,
+                "pycaps_template": row.pycaps_template or "word-focus",
+                "rendered_url": f"/clips/{Path(row.rendered_file_path).name}" if row.rendered_file_path else None,
             })
 
         return clips
@@ -128,7 +148,7 @@ class ClipRepository:
         params = {"clip_id": clip_id}
 
         for key, value in updates.items():
-            if key in ["filename", "file_path", "start_time", "end_time", "duration", "text", "relevance_score", "reasoning", "clip_order"]:
+            if key in ["filename", "file_path", "start_time", "end_time", "duration", "text", "relevance_score", "reasoning", "clip_order", "words_json", "pycaps_template", "rendered_file_path"]:
                 set_parts.append(f"{key} = :{key}")
                 params[key] = value
 

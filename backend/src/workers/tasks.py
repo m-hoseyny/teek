@@ -55,14 +55,11 @@ async def transcribe_video_task(
     url: str,
     source_type: str,
     user_id: str,
-    font_family: str = "TikTokSans-Regular",
-    font_size: int = 24,
-    font_color: str = "#FFFFFF",
+    pycaps_template: str = "word-focus",
     transitions_enabled: bool = False,
     transcription_provider: str = "local",
     ai_provider: str = "openai",
     ai_model: Optional[str] = None,
-    subtitle_style: Optional[Dict[str, Any]] = None,
     ai_routing_mode: Optional[str] = None,
     transcription_options: Optional[Dict[str, Any]] = None,
     transcript_review_enabled: bool = False,
@@ -340,19 +337,19 @@ async def transcribe_video_task(
 
             await update_progress(70, f"Creating {len(segments)} video clips...")
 
-            # Create clips
+            # Create clips WITHOUT subtitles (subtitles are added on-demand during export)
             clips_result = await VideoService.create_video_clips(
                 video_path=Path(video_path),
                 segments=segments,
-                font_family=font_family,
-                font_size=font_size,
-                font_color=font_color,
+                pycaps_template=pycaps_template,
                 progress_callback=lambda p, m, meta=None: progress.update(p, m, metadata=meta),
+                add_subtitles=False,
             )
 
-            # Save clips to database
+            # Save clips to database with word-level timing data
             await update_progress(95, "Saving clips...")
 
+            import json as _json
             clip_ids = []
             for i, clip_info in enumerate(clips_result["clips"]):
                 clip_id = await task_service.clip_repo.create_clip(
@@ -366,7 +363,9 @@ async def transcribe_video_task(
                     text=clip_info["text"],
                     relevance_score=clip_info["relevance_score"],
                     reasoning=clip_info["reasoning"],
-                    clip_order=i + 1
+                    clip_order=i + 1,
+                    words_json=_json.dumps(clip_info.get("words", []), ensure_ascii=False),
+                    pycaps_template=pycaps_template,
                 )
                 clip_ids.append(clip_id)
 
@@ -422,14 +421,11 @@ async def process_video_task(
     url: str,
     source_type: str,
     user_id: str,
-    font_family: str = "TikTokSans-Regular",
-    font_size: int = 24,
-    font_color: str = "#FFFFFF",
+    pycaps_template: str = "word-focus",
     transitions_enabled: bool = False,
     transcription_provider: str = "local",
     ai_provider: str = "openai",
     ai_model: Optional[str] = None,
-    subtitle_style: Optional[Dict[str, Any]] = None,
     ai_routing_mode: Optional[str] = None,
     transcription_options: Optional[Dict[str, Any]] = None,
     prompt_id: Optional[str] = None,
@@ -444,14 +440,11 @@ async def process_video_task(
         url: Video URL or file path
         source_type: "youtube" or "video_url"
         user_id: User ID who created the task
-        font_family: Font family for subtitles
-        font_size: Font size for subtitles
-        font_color: Font color for subtitles
+        pycaps_template: pycaps template name for animated subtitles
         transitions_enabled: Whether transition effects should be applied
         transcription_provider: "local" or "assemblyai"
         ai_provider: "openai", "google", "anthropic", or "zai"
         ai_model: Optional model override for the selected AI provider
-        subtitle_style: Extra subtitle style controls for rendering
         ai_routing_mode: Optional z.ai key routing mode ("auto", "subscription", "metered")
         transcription_options: Optional local transcription overrides and task timeout
         prompt_id: Prompt template ID for AI clip selection
@@ -499,16 +492,13 @@ async def process_video_task(
                 task_id=task_id,
                 url=url,
                 source_type=source_type,
-                font_family=font_family,
-                font_size=font_size,
-                font_color=font_color,
+                pycaps_template=pycaps_template,
                 transitions_enabled=transitions_enabled,
                 transcription_provider=transcription_provider,
                 ai_provider=ai_provider,
                 ai_model=ai_model,
                 ai_routing_mode=ai_routing_mode,
                 transcription_options=transcription_options,
-                subtitle_style=subtitle_style,
                 progress_callback=update_progress,
                 cancel_check=ensure_not_cancelled,
                 user_id=user_id,
@@ -645,22 +635,23 @@ async def generate_clips_from_transcript(
                 for clip in sorted(clips, key=lambda x: x.get("clip_order", 0))
             ]
 
-            # Create the clips
+            # Create the clips WITHOUT subtitles (subtitles added on-demand during export)
+            task_metadata = task.get("metadata") or {}
+            pycaps_template = task_metadata.get("pycaps_template", "word-focus")
             clips_result = await VideoService.create_video_clips(
                 video_path=Path(video_path),
                 segments=segments,
-                font_family=task.get("font_family", "TikTokSans-Regular"),
-                font_size=task.get("font_size", 24),
-                font_color=task.get("font_color", "#FFFFFF"),
+                pycaps_template=pycaps_template,
                 progress_callback=lambda p, m, meta=None: progress.update(p, m, metadata=meta),
+                add_subtitles=False,
             )
 
-            # Update clip records with actual file paths and durations
+            # Update clip records with actual file paths, durations, and word-level data
             await progress.update(95, "Saving clip files...")
 
+            import json as _json
             for i, clip_info in enumerate(clips_result["clips"]):
                 clip = clips[i]
-                # Update the clip with actual file path and duration
                 await task_service.clip_repo.update_clip(
                     db,
                     clip["id"],
@@ -668,6 +659,8 @@ async def generate_clips_from_transcript(
                         "filename": clip_info["filename"],
                         "file_path": clip_info["path"],
                         "duration": clip_info["duration"],
+                        "words_json": _json.dumps(clip_info.get("words", []), ensure_ascii=False),
+                        "pycaps_template": pycaps_template,
                     }
                 )
 

@@ -1,6 +1,7 @@
 """
 Clip API routes for task clip management.
 """
+from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 import json
@@ -362,3 +363,169 @@ async def update_clip_time(
     except Exception as e:
         logger.error(f"Error updating clip time: {e}")
         raise HTTPException(status_code=500, detail=f"Error updating clip time: {str(e)}")
+
+
+@router.put("/{task_id}/clips/{clip_id}/template")
+async def update_clip_template(
+    task_id: str,
+    clip_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Update the pycaps template for a specific clip."""
+    user_id = request.headers.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User authentication required")
+
+    try:
+        data = await request.json()
+        pycaps_template = data.get("pycaps_template")
+        if not pycaps_template:
+            raise HTTPException(status_code=400, detail="pycaps_template is required")
+
+        from ...pycaps_renderer import AVAILABLE_TEMPLATES
+        if pycaps_template not in AVAILABLE_TEMPLATES:
+            raise HTTPException(status_code=400, detail=f"Unknown template: {pycaps_template}")
+
+        task_service = TaskService(db)
+
+        task = await task_service.task_repo.get_task_by_id(db, task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+
+        clip = await task_service.clip_repo.get_clip_by_id(db, clip_id)
+        if not clip:
+            raise HTTPException(status_code=404, detail="Clip not found")
+        if clip["task_id"] != task_id:
+            raise HTTPException(status_code=404, detail="Clip not found in this task")
+
+        # Clear any previously rendered file since template changed
+        await task_service.clip_repo.update_clip(
+            db, clip_id, {"pycaps_template": pycaps_template, "rendered_file_path": None}
+        )
+
+        return {"message": "Clip template updated", "pycaps_template": pycaps_template}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating clip template: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{task_id}/clips/{clip_id}/render")
+async def render_clip(
+    task_id: str,
+    clip_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Render a clip with pycaps subtitles burned in (on-demand export).
+
+    Body (optional):
+        { "pycaps_template": "word-focus" }
+    If not provided, uses the clip's stored template.
+    """
+    user_id = request.headers.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User authentication required")
+
+    try:
+        data = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    except Exception:
+        data = {}
+
+    try:
+        task_service = TaskService(db)
+
+        # Verify ownership
+        task = await task_service.task_repo.get_task_by_id(db, task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+
+        if task.get("status") != "completed":
+            raise HTTPException(status_code=400, detail="Task is not completed yet")
+
+        # Get full clip data
+        clips = await task_service.clip_repo.get_clips_by_task(db, task_id)
+        clip_data = next((c for c in clips if c["id"] == clip_id), None)
+        if not clip_data:
+            raise HTTPException(status_code=404, detail="Clip not found")
+
+        raw_clip_path = Path(clip_data["file_path"])
+        if not raw_clip_path.exists():
+            raise HTTPException(status_code=404, detail="Clip video file not found on disk")
+
+        # Determine template
+        template = data.get("pycaps_template") or clip_data.get("pycaps_template") or "word-focus"
+
+        # Get caption options for RTL and custom font support
+        caption_options = data.get("caption_options") or {}
+
+        from ...pycaps_renderer import AVAILABLE_TEMPLATES, render_pycaps_subtitles
+        if template not in AVAILABLE_TEMPLATES:
+            raise HTTPException(status_code=400, detail=f"Unknown template: {template}")
+
+        # Build pycaps transcript from stored word-level data
+        words = clip_data.get("words", [])
+        if not words:
+            raise HTTPException(status_code=400, detail="No word-level timing data for this clip")
+
+        # Convert word timings from milliseconds to seconds for pycaps
+        # Words are stored in milliseconds in the database, but pycaps expects seconds
+        pycaps_words = [
+            {
+                "text": word["text"],
+                "start": round(word["start"] / 1000.0, 3),
+                "end": round(word["end"] / 1000.0, 3),
+            }
+            for word in words
+        ]
+
+        # For RTL text, reverse word order so highlighting progresses right-to-left
+        from ...pycaps_renderer import _is_rtl_text
+        has_rtl_option = caption_options.get("rtl", False)
+        has_rtl_text = has_rtl_option or any(_is_rtl_text(w["text"]) for w in pycaps_words)
+        if has_rtl_text:
+            pycaps_words = list(reversed(pycaps_words))
+
+        pycaps_transcript = {"segments": [{"words": pycaps_words}]}
+
+        # Generate output path
+        rendered_filename = f"rendered_{clip_id}_{template}.mp4"
+        rendered_path = Path(config.temp_dir) / "clips" / rendered_filename
+
+        # Run pycaps rendering in a thread
+        from ...utils.async_helpers import run_in_thread
+        success = await run_in_thread(
+            render_pycaps_subtitles, raw_clip_path, rendered_path, pycaps_transcript, template, caption_options
+        )
+
+        if not success:
+            raise HTTPException(status_code=500, detail="Subtitle rendering failed")
+
+        # Store the rendered path and template in DB
+        await task_service.clip_repo.update_clip(
+            db, clip_id,
+            {
+                "rendered_file_path": str(rendered_path),
+                "pycaps_template": template,
+            },
+        )
+
+        return {
+            "message": "Clip rendered successfully",
+            "clip_id": clip_id,
+            "pycaps_template": template,
+            "rendered_url": f"/clips/{rendered_filename}",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error rendering clip {clip_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error rendering clip: {str(e)}")

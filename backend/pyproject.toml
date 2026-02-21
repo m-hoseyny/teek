@@ -29,6 +29,8 @@ dependencies = [
     "sse-starlette>=1.6.5",
     "arq>=0.26.0",
     "redis>=5.0.0",
+    "pycaps[base] @ git+https://github.com/francozanardi/pycaps.git",
+    "html2pic>=0.2.0",
 ]
 
 [tool.uv]

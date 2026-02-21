@@ -1,5 +1,5 @@
 """
-Media API routes (fonts, transitions, uploads).
+Media API routes (fonts, transitions, uploads, pycaps templates).
 """
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
@@ -10,6 +10,12 @@ import uuid
 import aiofiles
 
 from ...config import Config
+from ...pycaps_renderer import (
+    AVAILABLE_TEMPLATES as PYCAPS_TEMPLATES,
+    TEMPLATE_DESCRIPTIONS as PYCAPS_DESCRIPTIONS,
+    DEFAULT_TEMPLATE as PYCAPS_DEFAULT,
+    generate_template_preview,
+)
 
 logger = logging.getLogger(__name__)
 config = Config()
@@ -211,3 +217,58 @@ async def upload_video(video: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Error uploading video: {str(e)}")
     finally:
         await video.close()
+
+
+# ---------------------------------------------------------------------------
+# PyCaps template endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/pycaps-templates")
+async def get_pycaps_templates():
+    """Return the list of available pycaps caption templates."""
+    templates = [
+        {
+            "name": name,
+            "display_name": name.replace("-", " ").title(),
+            "description": PYCAPS_DESCRIPTIONS.get(name, ""),
+            "is_default": name == PYCAPS_DEFAULT,
+        }
+        for name in PYCAPS_TEMPLATES
+    ]
+    return {"templates": templates, "default": PYCAPS_DEFAULT}
+
+
+@router.get("/pycaps-templates/{template_name}/preview")
+async def get_pycaps_template_preview(template_name: str):
+    """
+    Return a short preview video demonstrating the selected pycaps template.
+    The preview is generated on first request and cached for subsequent calls.
+    """
+    if template_name not in PYCAPS_TEMPLATES:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Template '{template_name}' not found. Available: {PYCAPS_TEMPLATES}",
+        )
+
+    preview_dir = Path(config.temp_dir) / "pycaps_previews"
+    preview_dir.mkdir(parents=True, exist_ok=True)
+    preview_path = preview_dir / f"{template_name}_preview.mp4"
+
+    if not preview_path.exists():
+        logger.info("Generating pycaps preview for template '%s'", template_name)
+        import asyncio
+        loop = asyncio.get_running_loop()
+        ok = await loop.run_in_executor(
+            None, generate_template_preview, template_name, preview_path
+        )
+        if not ok or not preview_path.exists():
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to generate preview for template '{template_name}'",
+            )
+
+    return FileResponse(
+        path=str(preview_path),
+        media_type="video/mp4",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )

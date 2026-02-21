@@ -1449,6 +1449,8 @@ def create_optimized_clip(
     font_color: str = "#FFFFFF",
     subtitle_style: Optional[Dict[str, Any]] = None,
     error_collector: Optional[List[str]] = None,
+    use_pycaps: bool = False,
+    pycaps_template: Optional[str] = None,
 ) -> bool:
     """Create optimized 9:16 clip with word-timed subtitles."""
     try:
@@ -1459,8 +1461,81 @@ def create_optimized_clip(
             logger.error(f"Invalid clip duration: {duration:.1f}s")
             return False
 
-        logger.info(f"Creating clip: {start_time:.1f}s - {end_time:.1f}s ({duration:.1f}s)")
+        logger.info(f"Creating clip: {start_time:.1f}s - {end_time:.1f}s ({duration:.1f}s) [pycaps={use_pycaps}]")
 
+        # Check if we should use PyCaps for animated subtitles
+        if use_pycaps and pycaps_template:
+            try:
+                from .services.pycaps_service import get_pycaps_service
+                pycaps_service = get_pycaps_service()
+                
+                # First, create the clip without subtitles
+                temp_output = output_path.with_suffix('.temp.mp4')
+                
+                # Load and process video
+                video = VideoFileClip(str(video_path))
+
+                if start_time >= video.duration:
+                    logger.error(f"Start time {start_time}s exceeds video duration {video.duration:.1f}s")
+                    video.close()
+                    return False
+
+                end_time = min(end_time, video.duration)
+                clip = video.subclipped(start_time, end_time)
+
+                # Get optimal crop
+                x_offset, y_offset, new_width, new_height = detect_optimal_crop_region(
+                    video, start_time, end_time, target_ratio=9/16
+                )
+
+                cropped_clip = clip.cropped(
+                    x1=x_offset, y1=y_offset,
+                    x2=x_offset + new_width, y2=y_offset + new_height
+                )
+
+                # Write temporary clip without subtitles
+                processor = VideoProcessor(font_family, font_size, font_color)
+                encoding_settings = processor.get_optimal_encoding_settings("high")
+                
+                cropped_clip.write_videofile(
+                    str(temp_output),
+                    temp_audiofile='temp-audio.m4a',
+                    remove_temp=True,
+                    logger=None,
+                    **encoding_settings
+                )
+
+                # Cleanup
+                cropped_clip.close()
+                clip.close()
+                video.close()
+                
+                # Now apply PyCaps subtitles
+                success = pycaps_service.render_subtitles(
+                    video_path=temp_output,
+                    output_path=output_path,
+                    template_id=pycaps_template,
+                    start_time=0,
+                    end_time=duration
+                )
+                
+                # Clean up temp file
+                if temp_output.exists():
+                    temp_output.unlink()
+                
+                if success:
+                    logger.info(f"Successfully created clip with PyCaps: {output_path}")
+                    return True
+                else:
+                    logger.warning(f"PyCaps rendering failed, falling back to standard subtitles")
+                    # Fall through to standard subtitle rendering
+                    
+            except ImportError:
+                logger.warning("PyCaps not available, using standard subtitles")
+            except Exception as e:
+                logger.warning(f"PyCaps rendering error: {e}, falling back to standard subtitles")
+
+        # Standard subtitle rendering (fallback or when PyCaps not enabled)
         # Load and process video
         video = VideoFileClip(str(video_path))
 
@@ -1537,6 +1612,10 @@ def create_clips_from_segments(
     subtitle_style: Optional[Dict[str, Any]] = None,
     diagnostics: Optional[Dict[str, Any]] = None,
     progress_callback: Optional[Callable[[int, int], None]] = None,
+    use_pycaps: bool = False,
+    pycaps_template: Optional[str] = None,
+    add_subtitles: bool = False,
+    caption_options: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """Create optimized video clips from segments."""
     video_path = Path(video_path)
@@ -1580,6 +1659,8 @@ def create_clips_from_segments(
                 font_color,
                 subtitle_style,
                 error_collector=clip_errors,
+                use_pycaps=use_pycaps,
+                pycaps_template=pycaps_template,
             )
 
             if success:
@@ -1716,6 +1797,10 @@ def create_clips_with_transitions(
     subtitle_style: Optional[Dict[str, Any]] = None,
     diagnostics: Optional[Dict[str, Any]] = None,
     progress_callback: Optional[Callable[[int, int], None]] = None,
+    use_pycaps: bool = False,
+    pycaps_template: Optional[str] = None,
+    add_subtitles: bool = False,
+    caption_options: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """Create video clips with transition effects between them."""
     video_path = Path(video_path)
@@ -1734,6 +1819,10 @@ def create_clips_with_transitions(
         subtitle_style,
         diagnostics=render_diagnostics,
         progress_callback=progress_callback,
+        use_pycaps=use_pycaps,
+        pycaps_template=pycaps_template,
+        add_subtitles=add_subtitles,
+        caption_options=caption_options,
     )
 
     if len(clips_info) < 2:
@@ -1840,13 +1929,26 @@ def parse_srt_content(srt_content: str) -> Dict[str, Any]:
             if not words:
                 continue
             
-            # Distribute timing across words
+            # Distribute timing across words proportionally by character count
+            # This provides more accurate word timings than equal distribution
             duration_ms = end_ms - start_ms
-            word_duration = duration_ms // len(words)
+            total_chars = sum(len(word) for word in words)
             
+            if total_chars == 0:
+                continue
+            
+            current_time = start_ms
             for i, word in enumerate(words):
-                word_start = start_ms + (i * word_duration)
-                word_end = word_start + word_duration if i < len(words) - 1 else end_ms
+                # Calculate word duration based on character proportion
+                char_ratio = len(word) / total_chars
+                word_duration = int(duration_ms * char_ratio)
+                
+                word_start = current_time
+                # For the last word, ensure it ends exactly at the subtitle end time
+                if i == len(words) - 1:
+                    word_end = end_ms
+                else:
+                    word_end = current_time + word_duration
                 
                 words_data.append({
                     "text": word,
@@ -1854,6 +1956,8 @@ def parse_srt_content(srt_content: str) -> Dict[str, Any]:
                     "end": word_end,
                     "confidence": 1.0,  # SRT doesn't have confidence scores
                 })
+                
+                current_time = word_end
             
             # Format for AI analysis: [MM:SS - MM:SS] Text
             start_time_str = format_ms_to_timestamp(start_ms)

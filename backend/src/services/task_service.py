@@ -43,9 +43,7 @@ class TaskService:
         user_id: str,
         url: str,
         title: Optional[str] = None,
-        font_family: str = "TikTokSans-Regular",
-        font_size: int = 24,
-        font_color: str = "#FFFFFF",
+        pycaps_template: str = "word-focus",
         transcription_provider: str = "local",
         ai_provider: str = "openai",
         transcript_review_enabled: bool = False,
@@ -85,8 +83,8 @@ class TaskService:
             url=url
         )
 
-        # Build metadata with prompt_id and clips_count for traceability
-        metadata = {}
+        # Build metadata with pycaps_template, prompt_id and clips_count for traceability
+        metadata: Dict[str, Any] = {"pycaps_template": pycaps_template}
         if prompt_id:
             metadata["prompt_id"] = prompt_id
         if clips_count is not None:
@@ -97,14 +95,11 @@ class TaskService:
             self.db,
             user_id=user_id,
             source_id=source_id,
-            status="queued",  # Changed from "processing" to "queued"
-            font_family=font_family,
-            font_size=font_size,
-            font_color=font_color,
+            status="queued",
             transcription_provider=transcription_provider,
             ai_provider=ai_provider,
             transcript_review_enabled=transcript_review_enabled,
-            metadata=metadata if metadata else None,
+            metadata=metadata,
         )
 
         logger.info(f"Created task {task_id} for user {user_id} with prompt_id={prompt_id}, clips_count={clips_count}")
@@ -265,16 +260,13 @@ class TaskService:
         task_id: str,
         url: str,
         source_type: str,
-        font_family: str = "TikTokSans-Regular",
-        font_size: int = 24,
-        font_color: str = "#FFFFFF",
+        pycaps_template: str = "word-focus",
         transitions_enabled: bool = False,
         transcription_provider: str = "local",
         ai_provider: str = "openai",
         ai_model: Optional[str] = None,
         ai_routing_mode: Optional[str] = None,
         transcription_options: Optional[Dict[str, Any]] = None,
-        subtitle_style: Optional[Dict[str, Any]] = None,
         progress_callback: Optional[Callable] = None,
         cancel_check: Optional[Callable[[], Awaitable[None]]] = None,
         user_id: Optional[str] = None,
@@ -345,9 +337,7 @@ class TaskService:
                 url=url,
                 source_type=source_type,
                 task_id=task_id,
-                font_family=font_family,
-                font_size=font_size,
-                font_color=font_color,
+                pycaps_template=pycaps_template,
                 transitions_enabled=transitions_enabled,
                 transcription_provider=transcription_provider,
                 assembly_api_key=assembly_api_key,
@@ -358,7 +348,6 @@ class TaskService:
                 ai_routing_mode=resolved_zai_routing_mode,
                 ai_model=ai_model,
                 transcription_options=transcription_options,
-                subtitle_style=subtitle_style,
                 progress_callback=update_progress,
                 cancel_check=cancel_check,
                 prompt_id=prompt_id,
