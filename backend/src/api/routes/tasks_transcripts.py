@@ -118,6 +118,55 @@ async def get_task_transcript_segments(task_id: str, request: Request, db: Async
         raise HTTPException(status_code=500, detail=f"Error retrieving transcript segments: {str(e)}")
 
 
+@router.get("/{task_id}/transcript/words")
+async def get_transcript_words(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Return every word from the transcript cache with absolute millisecond timings.
+
+    Used by the review page to render a word-synced subtitle overlay on the
+    source video without needing clip-relative offsets.
+    """
+    user_id = request.headers.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User authentication required")
+
+    try:
+        task_service = TaskService(db)
+        task = await task_service.task_repo.get_task_by_id(db, task_id)
+
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to access this task")
+
+        metadata = task.get("metadata") or {}
+        video_path = metadata.get("video_path")
+        if not video_path:
+            return {"task_id": task_id, "words": []}
+
+        transcript_data = load_cached_transcript_data(Path(video_path))
+        if not transcript_data or not transcript_data.get("words"):
+            return {"task_id": task_id, "words": []}
+
+        # Return raw word list (text, start ms, end ms) in absolute video time
+        words = [
+            {
+                "text": w.get("text", ""),
+                "start": int(w.get("start", 0)),
+                "end": int(w.get("end", 0)),
+            }
+            for w in transcript_data["words"]
+            if w.get("text", "").strip()
+        ]
+
+        return {"task_id": task_id, "words": words, "total_words": len(words)}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving transcript words: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.put("/{task_id}/transcript/segments")
 async def update_task_transcript_segments(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Update transcript segments (with timestamps) for a task."""

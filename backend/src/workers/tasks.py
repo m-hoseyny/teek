@@ -254,9 +254,28 @@ async def transcribe_video_task(
 
                 await update_progress(70, f"Identifying Viral Moments: Creating clip records...", metadata={"step": 4, "step_name": "virality_analysis"})
 
+                # Load transcript cache so we can store word-level timing in each clip record.
+                # This lets the subtitle preview work at the awaiting_review stage.
+                import json as _json
+                from ..video_utils import load_cached_transcript_data, parse_timestamp_to_seconds
+                _cached_tr = load_cached_transcript_data(Path(video_path))
+
                 # Create clip records in DB (without video files yet)
                 clip_ids = []
                 for i, seg in enumerate(segments):
+                    # Extract clip-relative word timings (ms) from the cached transcript
+                    _clip_words: list = []
+                    if _cached_tr and _cached_tr.get("words"):
+                        _s_ms = int(parse_timestamp_to_seconds(seg["start_time"]) * 1000)
+                        _e_ms = int(parse_timestamp_to_seconds(seg["end_time"]) * 1000)
+                        for _wd in _cached_tr["words"]:
+                            _ws, _we = _wd.get("start", 0), _wd.get("end", 0)
+                            if _ws < _e_ms and _we > _s_ms:
+                                _clip_words.append({
+                                    "text": _wd["text"],
+                                    "start": max(0, _ws - _s_ms),
+                                    "end": min(_e_ms - _s_ms, _we - _s_ms),
+                                })
                     clip_id = await task_service.clip_repo.create_clip(
                         db,
                         task_id=task_id,
@@ -268,7 +287,8 @@ async def transcribe_video_task(
                         text=seg["text"],  # This is the transcript the user can edit
                         relevance_score=seg["relevance_score"],
                         reasoning=seg["reasoning"],
-                        clip_order=i + 1
+                        clip_order=i + 1,
+                        words_json=_json.dumps(_clip_words, ensure_ascii=False),
                     )
                     clip_ids.append(clip_id)
 
@@ -282,7 +302,7 @@ async def transcribe_video_task(
                     db, task_id, "awaiting_review", progress=70,
                     progress_message=f"AI found {len(segments)} clips. Please review and edit the subtitles for each clip, then click 'Generate Clips' to create the videos."
                 )
-                await progress.update(70, f"AI analysis complete! Found {len(segments)} clips. Please review and edit the subtitles, then click 'Generate Clips'.")
+                await progress.update(70, f"AI analysis complete! Found {len(segments)} clips. Please review and edit the subtitles, then click 'Generate Clips'.", status="awaiting_review")
 
                 logger.info(f"Task {task_id} paused for clip transcript review with {len(segments)} clips")
 
@@ -807,9 +827,28 @@ async def retry_clips_analysis(
 
             await update_progress(70, f"Identifying Viral Moments: Creating clip records...", metadata={"step": 4, "step_name": "virality_analysis"})
 
+            # Load transcript cache for word-level timing (subtitle preview)
+            import json as _json
+            from ..video_utils import load_cached_transcript_data, parse_timestamp_to_seconds
+            _retry_video_path = (task.get("metadata") or {}).get("video_path")
+            _cached_tr_retry = load_cached_transcript_data(Path(_retry_video_path)) if _retry_video_path else None
+
             # Create clip records in DB (without video files yet)
             clip_ids = []
             for i, seg in enumerate(segments):
+                # Extract clip-relative word timings (ms) from the cached transcript
+                _clip_words: list = []
+                if _cached_tr_retry and _cached_tr_retry.get("words"):
+                    _s_ms = int(parse_timestamp_to_seconds(seg["start_time"]) * 1000)
+                    _e_ms = int(parse_timestamp_to_seconds(seg["end_time"]) * 1000)
+                    for _wd in _cached_tr_retry["words"]:
+                        _ws, _we = _wd.get("start", 0), _wd.get("end", 0)
+                        if _ws < _e_ms and _we > _s_ms:
+                            _clip_words.append({
+                                "text": _wd["text"],
+                                "start": max(0, _ws - _s_ms),
+                                "end": min(_e_ms - _s_ms, _we - _s_ms),
+                            })
                 clip_id = await task_service.clip_repo.create_clip(
                     db,
                     task_id=task_id,
@@ -821,7 +860,8 @@ async def retry_clips_analysis(
                     text=seg["text"],  # This is the transcript the user can edit
                     relevance_score=seg["relevance_score"],
                     reasoning=seg["reasoning"],
-                    clip_order=i + 1
+                    clip_order=i + 1,
+                    words_json=_json.dumps(_clip_words, ensure_ascii=False),
                 )
                 clip_ids.append(clip_id)
 
@@ -841,7 +881,7 @@ async def retry_clips_analysis(
                 db, task_id, "awaiting_review", progress=70,
                 progress_message=f"AI found {len(segments)} new clips. Please review and edit the subtitles for each clip, then click 'Generate Clips' to create the videos."
             )
-            await progress.update(70, f"AI re-analysis complete! Found {len(segments)} new clips. Please review and edit the subtitles, then click 'Generate Clips'.")
+            await progress.update(70, f"AI re-analysis complete! Found {len(segments)} new clips. Please review and edit the subtitles, then click 'Generate Clips'.", status="awaiting_review")
 
             logger.info(f"Task {task_id} ready for review with {len(segments)} new clips after retry")
 

@@ -19,9 +19,10 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useSession } from "@/lib/auth-client";
-import { ArrowLeft, Download, Clock, Star, AlertCircle, Trash2, Edit2, X, Check, FileText, Play, Save } from "lucide-react";
+import { ArrowLeft, Download, Clock, Star, AlertCircle, Trash2, Edit2, X, Check, FileText, Play, Save, Eye } from "lucide-react";
 import Link from "next/link";
 import DynamicVideoPlayer, { type VideoPlayerRef } from "@/components/dynamic-video-player";
+import { ClipPreviewModal } from "@/components/clip/ClipPreviewModal";
 
 interface Clip {
   id: string;
@@ -153,6 +154,13 @@ export default function TaskPage() {
   const [editingClipId, setEditingClipId] = useState<string | null>(null);
   const [editedClipData, setEditedClipData] = useState<{ start_time: string; end_time: string; text: string }>({ start_time: "", end_time: "", text: "" });
   const [isSavingClip, setIsSavingClip] = useState(false);
+  const [previewClipId, setPreviewClipId] = useState<string | null>(null);
+  const [selectedClipData, setSelectedClipData] = useState<{ startTime: string; endTime: string; text: string } | null>(null);
+
+  const handlePreviewSubtitles = (clip: { id: string; start_time: string; end_time: string; text?: string }) => {
+    setPreviewClipId(clip.id);
+    setSelectedClipData({ startTime: clip.start_time, endTime: clip.end_time, text: clip.text || "" });
+  };
 
   const handleEditClip = (clip: Clip, elementId?: string) => {
     setEditingClipId(clip.id);
@@ -460,6 +468,10 @@ export default function TaskPage() {
         }
         if (typeof data.status === "string") {
           setTask((prev) => (prev ? { ...prev, status: data.status } : prev));
+          // When the task enters awaiting_review, fetch the full task so clips are loaded
+          if (data.status === "awaiting_review") {
+            fetchTaskStatus();
+          }
         }
       } catch (err) {
         console.error("Failed to parse progress event:", err);
@@ -1305,6 +1317,17 @@ export default function TaskPage() {
                                 </Button>
                               </>
                             )}
+                            {sourceVideoUrl && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="border-purple-300 text-purple-700 hover:bg-purple-50"
+                                onClick={() => handlePreviewSubtitles(clip)}
+                              >
+                                <Eye className="w-4 h-4 mr-2" />
+                                Preview Subtitles
+                              </Button>
+                            )}
                           </div>
                         </>
                       )}
@@ -1563,6 +1586,15 @@ export default function TaskPage() {
                               <Play className="w-4 h-4 mr-2" />
                               Play Clip Segment
                             </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="border-purple-300 text-purple-700 hover:bg-purple-50"
+                              onClick={() => handlePreviewSubtitles(clip)}
+                            >
+                              <Eye className="w-4 h-4 mr-2" />
+                              Preview Subtitles
+                            </Button>
                           </>
                         )}
                         <Button size="sm" variant="outline" asChild>
@@ -1629,6 +1661,21 @@ export default function TaskPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Subtitle Preview Modal */}
+      {previewClipId && selectedClipData && sourceVideoUrl && userId && taskId && (
+        <ClipPreviewModal
+          isOpen
+          onClose={() => { setPreviewClipId(null); setSelectedClipData(null); }}
+          clipId={previewClipId}
+          taskId={taskId}
+          userId={userId}
+          sourceVideoUrl={sourceVideoUrl}
+          startTime={selectedClipData.startTime}
+          endTime={selectedClipData.endTime}
+          text={selectedClipData.text}
+        />
+      )}
     </div>
   );
 }

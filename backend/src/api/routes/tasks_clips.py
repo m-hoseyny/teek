@@ -46,6 +46,71 @@ async def get_task_clips(task_id: str, request: Request, db: AsyncSession = Depe
         raise HTTPException(status_code=500, detail=f"Error retrieving clips: {str(e)}")
 
 
+@router.get("/{task_id}/clips/{clip_id}/words")
+async def get_clip_words(task_id: str, clip_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Get word-level timing data for a clip to enable subtitle preview."""
+    user_id = request.headers.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User authentication required")
+
+    try:
+        task_service = TaskService(db)
+
+        # Verify task ownership
+        task = await task_service.task_repo.get_task_by_id(db, task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to access this task")
+
+        # Get all clips for task to find the specific clip with full data
+        clips = await task_service.clip_repo.get_clips_by_task(db, task_id)
+        clip = next((c for c in clips if c["id"] == clip_id), None)
+
+        if not clip:
+            raise HTTPException(status_code=404, detail="Clip not found")
+
+        # Parse word-level data (already parsed in get_clips_by_task)
+        words = clip.get("words", [])
+
+        # Fallback: if words_json is empty (clips created before word extraction was added),
+        # read directly from the transcript cache on disk.
+        if not words:
+            metadata = task.get("metadata") or {}
+            video_path_str = metadata.get("video_path")
+            if video_path_str:
+                from pathlib import Path
+                from ...video_utils import load_cached_transcript_data, parse_timestamp_to_seconds
+                cached = load_cached_transcript_data(Path(video_path_str))
+                if cached and cached.get("words"):
+                    s_ms = int(parse_timestamp_to_seconds(clip["start_time"]) * 1000)
+                    e_ms = int(parse_timestamp_to_seconds(clip["end_time"]) * 1000)
+                    for wd in cached["words"]:
+                        ws, we = wd.get("start", 0), wd.get("end", 0)
+                        if ws < e_ms and we > s_ms:
+                            words.append({
+                                "text": wd["text"],
+                                "start": max(0, ws - s_ms),
+                                "end": min(e_ms - s_ms, we - s_ms),
+                            })
+
+        return {
+            "clip_id": clip_id,
+            "task_id": task_id,
+            "start_time": clip["start_time"],
+            "end_time": clip["end_time"],
+            "text": clip["text"],
+            "pycaps_template": clip.get("pycaps_template", "word-focus"),
+            "words": words,  # Array of {text, start, end} in milliseconds
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving clip words: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error retrieving clip words: {str(e)}")
+
+
 @router.delete("/{task_id}/clips/{clip_id}")
 async def delete_clip(task_id: str, clip_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Delete a specific clip."""

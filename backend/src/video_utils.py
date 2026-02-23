@@ -1731,6 +1731,23 @@ def create_clips_from_segments(
             )
 
             if success:
+                # Extract word-level timing for this clip from transcript cache.
+                # Words are stored clip-relative in milliseconds (0 = clip start).
+                clip_words: List[Dict[str, Any]] = []
+                cached = load_cached_transcript_data(video_path)
+                if cached and cached.get("words"):
+                    clip_start_ms = int(start_seconds * 1000)
+                    clip_end_ms = int(end_seconds * 1000)
+                    for wd in cached["words"]:
+                        w_start = wd.get("start", 0)
+                        w_end = wd.get("end", 0)
+                        if w_start < clip_end_ms and w_end > clip_start_ms:
+                            clip_words.append({
+                                "text": wd["text"],
+                                "start": max(0, w_start - clip_start_ms),
+                                "end": min(clip_end_ms - clip_start_ms, w_end - clip_start_ms),
+                            })
+
                 clip_info = {
                     "clip_id": i + 1,
                     "filename": clip_filename,
@@ -1740,7 +1757,8 @@ def create_clips_from_segments(
                     "duration": duration,
                     "text": segment['text'],
                     "relevance_score": segment['relevance_score'],
-                    "reasoning": segment['reasoning']
+                    "reasoning": segment['reasoning'],
+                    "words": clip_words,
                 }
                 clips_info.append(clip_info)
                 logger.info(f"Created clip {i+1}: {duration:.1f}s")
