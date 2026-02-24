@@ -86,10 +86,10 @@ def _coerce_int(raw: object, field_name: str) -> int:
 def _resolve_transcription_provider(raw: object) -> str:
     """Resolve transcription provider from raw value."""
     if not isinstance(raw, str):
-        return "local"
+        return "assemblyai"
     provider = raw.strip().lower()
     if provider not in SUPPORTED_TRANSCRIPTION_PROVIDERS:
-        return "local"
+        return "assemblyai"
     return provider
 
 

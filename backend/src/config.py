@@ -16,7 +16,7 @@ class Config:
         self.whisper_chunking_enabled = env_bool("WHISPER_CHUNKING_ENABLED", "true")
         self.whisper_chunk_duration_seconds = int(os.getenv("WHISPER_CHUNK_DURATION_SECONDS", "1200"))
         self.whisper_chunk_overlap_seconds = int(os.getenv("WHISPER_CHUNK_OVERLAP_SECONDS", "8"))
-        self.transcription_provider = (os.getenv("TRANSCRIPTION_PROVIDER", "local") or "local").strip().lower()
+        self.transcription_provider = (os.getenv("TRANSCRIPTION_PROVIDER", "assemblyai") or "assemblyai").strip().lower()
         self.llm = os.getenv("LLM") or os.getenv("LLM_MODEL") or "openai:gpt-5-mini"
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
         self.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")

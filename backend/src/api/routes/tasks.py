@@ -128,7 +128,7 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
         }
     else:
         transcription_provider = _resolve_transcription_provider(
-            transcription_options.get("provider", "local")
+            transcription_options.get("provider", "assemblyai")
         )
 
     transcription_runtime_options = _resolve_transcription_runtime_options(
@@ -376,9 +376,11 @@ async def get_task_progress_sse(task_id: str, request: Request, db: AsyncSession
     if task["user_id"] != user_id:
         raise HTTPException(status_code=403, detail="Not authorized to access this task")
 
+    TERMINAL_STATUSES = {"completed", "error", "awaiting_review"}
+
     async def event_generator():
         """Generate SSE events for task progress."""
-        # Send initial task status
+        # Send initial task status from DB
         yield {
             "event": "status",
             "data": json.dumps({
@@ -389,8 +391,8 @@ async def get_task_progress_sse(task_id: str, request: Request, db: AsyncSession
             })
         }
 
-        # If task is already completed or error, close connection
-        if task.get("status") in ["completed", "error"]:
+        # If task already reached a terminal state, close immediately
+        if task.get("status") in TERMINAL_STATUSES:
             yield {
                 "event": "close",
                 "data": json.dumps({"status": task.get("status")})
@@ -405,15 +407,21 @@ async def get_task_progress_sse(task_id: str, request: Request, db: AsyncSession
         )
 
         try:
-            # Subscribe to progress updates
+            # subscribe_to_progress checks cached Redis state after subscribing
+            # (fixes race where worker finished before SSE client connected),
+            # and yields None as a heartbeat every ~15 s.
             async for progress_data in ProgressTracker.subscribe_to_progress(redis_client, task_id):
+                if progress_data is None:
+                    # Heartbeat: send an empty comment to keep the connection alive
+                    yield {"event": "heartbeat", "data": "{}"}
+                    continue
+
                 yield {
                     "event": "progress",
                     "data": json.dumps(progress_data)
                 }
 
-                # Close connection if task is done
-                if progress_data.get("status") in ["completed", "error"]:
+                if progress_data.get("status") in TERMINAL_STATUSES:
                     yield {
                         "event": "close",
                         "data": json.dumps({"status": progress_data.get("status")})
@@ -501,7 +509,7 @@ async def retry_task(task_id: str, request: Request, db: AsyncSession = Depends(
         task_metadata = task.get("metadata") or {}
         pycaps_template = task_metadata.get("pycaps_template", "word-focus")
         transitions_enabled = task_metadata.get("transitions_enabled", False)
-        transcription_provider = task.get("transcription_provider", "local")
+        transcription_provider = task.get("transcription_provider", "assemblyai")
         ai_provider = task.get("ai_provider", "openai")
         ai_model = task_metadata.get("ai_model")
         ai_routing_mode = task_metadata.get("ai_routing_mode")
