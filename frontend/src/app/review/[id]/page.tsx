@@ -65,6 +65,12 @@ const CLIP_COLORS = [
   "#EF4444", "#EC4899", "#14B8A6", "#8B5CF6",
 ];
 
+// Matches Arabic, Hebrew, and other RTL scripts
+const RTL_REGEX = /[\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC]/;
+function isRTL(text: string): boolean {
+  return RTL_REGEX.test(text);
+}
+
 /** Parse "HH:MM:SS", "MM:SS", or float-string → seconds */
 function parseTs(ts: string): number {
   if (!ts) return 0;
@@ -103,6 +109,7 @@ export default function ReviewPage() {
   const [transitionsEnabled, setTransitionsEnabled] = useState(false);
   const [aspectRatio, setAspectRatio] = useState<"9:16" | "1:1" | "16:9">("9:16");
   const [savingClipId, setSavingClipId] = useState<string | null>(null);
+  const [subtitleStyle, setSubtitleStyle] = useState<{ font_size: number }>({ font_size: 28 });
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const animFrameRef = useRef<number>();
@@ -149,11 +156,26 @@ export default function ReviewPage() {
       }
     };
 
+    const fetchSubtitleDefaults = async () => {
+      try {
+        const res = await fetch(`${apiUrl}/subtitle-style/defaults`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.defaults?.font_size) {
+            setSubtitleStyle({ font_size: data.defaults.font_size });
+          }
+        }
+      } catch {
+        // keep default
+      }
+    };
+
     fetchTask();
     fetchSegments();
     fetchWords();
     fetchVideo();
     fetchClips();
+    fetchSubtitleDefaults();
   }, [taskId, session?.user?.id, apiUrl]);
 
   // Smooth currentTime updates via requestAnimationFrame
@@ -268,7 +290,7 @@ export default function ReviewPage() {
       const response = await fetch(`${apiUrl}/tasks/${taskId}/generate-clips`, {
         method: "POST",
         headers: { "Content-Type": "application/json", user_id: session.user.id },
-        body: JSON.stringify({ transitions_enabled: transitionsEnabled, aspect_ratio: aspectRatio }),
+        body: JSON.stringify({ transitions_enabled: transitionsEnabled, aspect_ratio: aspectRatio, subtitle_style: subtitleStyle }),
       });
       if (response.ok) router.push(`/studio/${taskId}`);
     } catch (error) {
@@ -341,6 +363,7 @@ export default function ReviewPage() {
                     currentTime={currentTime}
                     clipStartSeconds={0}
                     template={STYLE_TO_TEMPLATE[selectedStyle] ?? "word-focus"}
+                    subtitleStyle={subtitleStyle}
                   />
                 )}
 
@@ -655,7 +678,8 @@ export default function ReviewPage() {
                             onChange={(e) => handleSegmentEdit(segment.id, e.target.value)}
                             onBlur={handleSaveTranscript}
                             onClick={(e) => e.stopPropagation()}
-                            className={`flex-1 text-sm bg-transparent border-none outline-none resize-none transition-colors ${isActive ? "text-white font-medium" : "text-gray-300 group-hover:text-white"}`}
+                            dir={isRTL(segment.text) ? "rtl" : "ltr"}
+                            className={`flex-1 text-sm bg-transparent border-none outline-none resize-none transition-colors ${isActive ? "text-white font-medium" : "text-gray-300 group-hover:text-white"} ${isRTL(segment.text) ? "text-right" : "text-left"}`}
                             rows={Math.ceil(segment.text.length / 50)}
                           />
                         </div>
@@ -685,6 +709,33 @@ export default function ReviewPage() {
                   </button>
                 ))}
               </div>
+
+              {/* Font Size Slider */}
+              <div className="mt-5 pt-4 border-t border-border/40">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs text-gray-400 font-semibold uppercase tracking-wide">Font Size</span>
+                  <span className="text-xs font-mono font-bold text-white bg-primary/20 px-2 py-0.5 rounded">
+                    {subtitleStyle.font_size}px
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={16}
+                  max={56}
+                  step={2}
+                  value={subtitleStyle.font_size}
+                  onChange={(e) => setSubtitleStyle({ font_size: parseInt(e.target.value) })}
+                  className="w-full h-2 rounded-lg appearance-none cursor-pointer"
+                  style={{
+                    background: `linear-gradient(to right, #A855F7 0%, #A855F7 ${((subtitleStyle.font_size - 16) / 40) * 100}%, #374151 ${((subtitleStyle.font_size - 16) / 40) * 100}%, #374151 100%)`,
+                  }}
+                />
+                <div className="flex justify-between text-[10px] text-gray-600 mt-1">
+                  <span>16</span>
+                  <span>56</span>
+                </div>
+              </div>
+
               <p className="text-xs text-gray-500 mt-3">
                 Select a style to preview it live on the video above.
               </p>
