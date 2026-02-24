@@ -1,34 +1,56 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useSession } from "@/lib/auth-client";
 import { VideoPlayer } from "@/components/clip/VideoPlayer";
-import { Download, Share2, Edit, Trash2, Sparkles } from "lucide-react";
+import {
+  Download, Share2, Edit, Trash2, Sparkles,
+  Clock, Brain, TrendingUp, ChevronRight, Loader2, Clapperboard,
+} from "lucide-react";
 
 interface Clip {
   id: string;
-  task_id: string;
-  start_time: number;
-  end_time: number;
+  task_id?: string;
+  start_time: string;
+  end_time: string;
   duration: number;
-  virality_score: number;
-  hook: string;
-  transcript_text: string;
+  relevance_score: number;
+  text: string;
+  reasoning: string;
   filename: string | null;
-  aspect_ratio: string;
+  clip_order: number;
   created_at: string;
 }
 
 interface TaskData {
   id: string;
   status: string;
-  source: {
-    title: string;
-    url: string;
-  };
+  source: { title: string; url: string };
   clips: Clip[];
+}
+
+interface GenProgress {
+  progress: number;
+  message: string;
+  clipsCompleted: number;
+  clipsTotal: number;
+}
+
+function ScoreBadge({ score }: { score: number }) {
+  const pct = Math.round(score * 100);
+  const color =
+    pct >= 80 ? "from-emerald-500 to-green-400"
+    : pct >= 60 ? "from-violet-500 to-purple-400"
+    : pct >= 40 ? "from-amber-500 to-yellow-400"
+    : "from-gray-500 to-gray-400";
+  return (
+    <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gradient-to-r ${color} text-white text-xs font-bold shadow-sm`}>
+      <TrendingUp className="w-3 h-3" />
+      {pct}%
+    </div>
+  );
 }
 
 export default function StudioPage() {
@@ -42,69 +64,172 @@ export default function StudioPage() {
   const [clips, setClips] = useState<Clip[]>([]);
   const [selectedClip, setSelectedClip] = useState<Clip | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [genProgress, setGenProgress] = useState<GenProgress>({
+    progress: 0, message: "Generating clips…", clipsCompleted: 0, clipsTotal: 0,
+  });
 
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const connectSSERef = useRef<(() => void) | null>(null);
+
+  // Fetch clips only (called after processing completes to refresh)
+  // NOTE: no selectedClip dependency — use functional update to avoid re-render loop
+  const fetchClips = useCallback(async () => {
+    if (!session?.user?.id) return;
+    try {
+      const res = await fetch(`${apiUrl}/tasks/${taskId}/clips`, {
+        headers: { user_id: session.user.id },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const fetched: Clip[] = data.clips || [];
+        setClips(fetched);
+        setSelectedClip((prev) => prev ?? fetched[0] ?? null);
+      }
+    } catch (e) {
+      console.error("Failed to fetch clips:", e);
+    }
+  }, [apiUrl, taskId, session?.user?.id]);
+
+  // Connect to SSE for real-time clip generation progress
+  const connectSSE = useCallback(() => {
+    if (!session?.user?.id) return;
+    if (eventSourceRef.current) eventSourceRef.current.close();
+
+    const es = new EventSource(
+      `${apiUrl}/tasks/${taskId}/progress?user_id=${session.user.id}`
+    );
+
+    es.addEventListener("progress", (evt: MessageEvent) => {
+      try {
+        const data = JSON.parse(evt.data);
+        const meta = data.metadata || {};
+
+        const clipsCompleted = meta.clips_completed ?? 0;
+        const clipsTotal = meta.clips_total ?? 0;
+
+        setGenProgress({
+          progress: data.progress ?? 0,
+          message: data.message || "Generating clips…",
+          clipsCompleted,
+          clipsTotal,
+        });
+
+        if (data.status === "completed") {
+          es.close();
+          setIsProcessing(false);
+          fetchClips();
+        } else if (data.status === "error" || data.status === "failed") {
+          es.close();
+          setIsProcessing(false);
+        }
+      } catch {}
+    });
+
+    es.addEventListener("status", (evt: MessageEvent) => {
+      try {
+        const data = JSON.parse(evt.data);
+        if (data.status === "completed") {
+          es.close();
+          setIsProcessing(false);
+          fetchClips();
+        }
+      } catch {}
+    });
+
+    es.addEventListener("close", () => {
+      es.close();
+    });
+
+    es.onerror = () => {
+      es.close();
+      // Fallback: poll task status every 4 seconds
+      if (pollRef.current) clearInterval(pollRef.current);
+      pollRef.current = setInterval(async () => {
+        if (!session?.user?.id) return;
+        try {
+          const res = await fetch(`${apiUrl}/tasks/${taskId}`, {
+            headers: { user_id: session.user.id },
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.status === "completed") {
+              clearInterval(pollRef.current!);
+              setIsProcessing(false);
+              fetchClips();
+            }
+          }
+        } catch {}
+      }, 4000);
+    };
+
+    eventSourceRef.current = es;
+  }, [apiUrl, taskId, session?.user?.id, fetchClips]);
+
+  // Keep connectSSERef up-to-date without adding it to the effect deps
+  useEffect(() => {
+    connectSSERef.current = connectSSE;
+  }, [connectSSE]);
+
+  // Run once on mount (taskId / userId are stable identifiers)
   useEffect(() => {
     if (!session?.user?.id || !taskId) return;
 
-    const fetchTaskAndClips = async () => {
+    const init = async () => {
       try {
-        // Fetch task details
-        const taskResponse = await fetch(`${apiUrl}/tasks/${taskId}`, {
-          headers: { user_id: session.user.id },
-        });
+        const [taskRes, clipsRes] = await Promise.all([
+          fetch(`${apiUrl}/tasks/${taskId}`, { headers: { user_id: session.user.id } }),
+          fetch(`${apiUrl}/tasks/${taskId}/clips`, { headers: { user_id: session.user.id } }),
+        ]);
 
-        if (taskResponse.ok) {
-          const taskData = await taskResponse.json();
+        if (taskRes.ok) {
+          const taskData = await taskRes.json();
           setTask(taskData);
-
-          // Fetch clips
-          const clipsResponse = await fetch(`${apiUrl}/tasks/${taskId}/clips`, {
-            headers: { user_id: session.user.id },
-          });
-
-          if (clipsResponse.ok) {
-            const clipsData = await clipsResponse.json();
-            setClips(clipsData.clips || []);
-            if (clipsData.clips && clipsData.clips.length > 0) {
-              setSelectedClip(clipsData.clips[0]);
-            }
+          if (taskData.status === "processing") {
+            setIsProcessing(true);
+            connectSSERef.current?.();
           }
         }
-      } catch (error) {
-        console.error("Failed to fetch task and clips:", error);
+
+        if (clipsRes.ok) {
+          const clipsData = await clipsRes.json();
+          const fetched: Clip[] = clipsData.clips || [];
+          setClips(fetched);
+          if (fetched.length > 0) setSelectedClip(fetched[0]);
+        }
+      } catch (e) {
+        console.error("Failed to fetch task/clips:", e);
       } finally {
         setIsLoading(false);
       }
     };
 
-    fetchTaskAndClips();
-  }, [taskId, session?.user?.id, apiUrl]);
+    init();
+
+    return () => {
+      eventSourceRef.current?.close();
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskId, session?.user?.id]);
 
   const handleDeleteClip = async (clipId: string) => {
     if (!session?.user?.id) return;
     if (!confirm("Are you sure you want to delete this clip?")) return;
-
     try {
-      const response = await fetch(`${apiUrl}/tasks/${taskId}/clips/${clipId}`, {
+      const res = await fetch(`${apiUrl}/tasks/${taskId}/clips/${clipId}`, {
         method: "DELETE",
         headers: { user_id: session.user.id },
       });
-
-      if (response.ok) {
-        setClips(clips.filter((c) => c.id !== clipId));
-        if (selectedClip?.id === clipId) {
-          setSelectedClip(clips[0] || null);
-        }
+      if (res.ok) {
+        const remaining = clips.filter((c) => c.id !== clipId);
+        setClips(remaining);
+        if (selectedClip?.id === clipId) setSelectedClip(remaining[0] || null);
       }
-    } catch (error) {
-      console.error("Failed to delete clip:", error);
+    } catch (e) {
+      console.error("Failed to delete clip:", e);
     }
-  };
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
   if (isLoading) {
@@ -112,34 +237,23 @@ export default function StudioPage() {
       <AppLayout>
         <div className="flex items-center justify-center h-screen">
           <div className="text-center">
-            <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-            <p className="text-gray-400">Loading clips...</p>
+            <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+            <p className="text-gray-400">Loading studio…</p>
           </div>
         </div>
       </AppLayout>
     );
   }
 
-  if (!task || clips.length === 0) {
+  // Task not found
+  if (!task) {
     return (
       <AppLayout>
         <div className="flex items-center justify-center h-screen">
           <div className="text-center max-w-md">
-            <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
-              <Sparkles className="w-8 h-8 text-gray-500" />
-            </div>
-            <h2 className="text-2xl font-bold text-white mb-2">
-              {clips.length === 0 ? "No clips generated yet" : "Task not found"}
-            </h2>
-            <p className="text-gray-400 mb-6">
-              {clips.length === 0
-                ? "The AI is still analyzing your video. Clips will appear here once processing is complete."
-                : "The task you're looking for doesn't exist."}
-            </p>
-            <button
-              onClick={() => router.push("/library")}
-              className="px-6 py-3 rounded-lg bg-primary hover:bg-primary/90 text-white font-semibold transition-colors"
-            >
+            <h2 className="text-2xl font-bold text-white mb-2">Task not found</h2>
+            <button onClick={() => router.push("/library")}
+              className="px-6 py-3 rounded-lg bg-primary hover:bg-primary/90 text-white font-semibold transition-colors">
               Go to Library
             </button>
           </div>
@@ -148,184 +262,296 @@ export default function StudioPage() {
     );
   }
 
+  // No clips and not processing → empty state
+  if (clips.length === 0 && !isProcessing) {
+    return (
+      <AppLayout>
+        <div className="flex items-center justify-center h-screen">
+          <div className="text-center max-w-md">
+            <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
+              <Sparkles className="w-8 h-8 text-gray-500" />
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-2">No clips generated yet</h2>
+            <p className="text-gray-400 mb-6">
+              The AI is still analyzing your video. Clips will appear here once processing is complete.
+            </p>
+            <button onClick={() => router.push("/library")}
+              className="px-6 py-3 rounded-lg bg-primary hover:bg-primary/90 text-white font-semibold transition-colors">
+              Go to Library
+            </button>
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  const selectedIndex = clips.findIndex((c) => c.id === selectedClip?.id);
+
   return (
     <AppLayout>
       <div className="max-w-[1600px] mx-auto">
         {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-white mb-2">Viral Clips Studio</h1>
-          <p className="text-gray-400">{task.source?.title || "Generated Clips"}</p>
+        <div className="mb-5">
+          <div className="flex items-center gap-2 mb-1">
+            <Clapperboard className="w-5 h-5 text-primary" />
+            <h1 className="text-2xl font-bold text-white">Viral Clips Studio</h1>
+          </div>
+          <p className="text-gray-400 text-sm">{task.source?.title || "Generated Clips"}</p>
         </div>
 
-        <div className="grid grid-cols-3 gap-6">
-          {/* Left Column - Video Player */}
-          <div className="col-span-2 space-y-6">
-            {/* Main Clip Player */}
-            {selectedClip && selectedClip.filename && (
-              <div className="glass rounded-2xl p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h3 className="text-lg font-semibold text-white mb-1">
-                      Clip {clips.findIndex((c) => c.id === selectedClip.id) + 1} of {clips.length}
-                    </h3>
-                    <p className="text-sm text-gray-400">
-                      {formatTime(selectedClip.start_time)} - {formatTime(selectedClip.end_time)} •{" "}
-                      {selectedClip.duration}s
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="px-3 py-1 rounded-full bg-primary/20 text-primary text-sm font-semibold">
-                      {Math.round(selectedClip.virality_score * 100)}% Viral
-                    </span>
-                  </div>
-                </div>
-
-                <VideoPlayer
-                  src={`${apiUrl}/clips/${selectedClip.filename}`}
-                  aspectRatio={selectedClip.aspect_ratio as "9:16" | "1:1" | "16:9"}
-                />
-
-                {/* Clip Actions */}
-                <div className="flex items-center gap-3 mt-4">
-                  <button className="flex-1 h-12 rounded-lg bg-gradient-purple hover:bg-gradient-purple-hover text-white font-semibold transition-all flex items-center justify-center gap-2">
-                    <Download className="w-4 h-4" />
-                    Download
-                  </button>
-                  <button className="h-12 px-6 rounded-lg bg-muted hover:bg-muted/80 text-white font-semibold transition-all flex items-center justify-center gap-2">
-                    <Share2 className="w-4 h-4" />
-                    Share
-                  </button>
-                  <button className="h-12 px-6 rounded-lg bg-muted hover:bg-muted/80 text-white font-semibold transition-all flex items-center justify-center gap-2">
-                    <Edit className="w-4 h-4" />
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => handleDeleteClip(selectedClip.id)}
-                    className="h-12 px-6 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 font-semibold transition-all flex items-center justify-center gap-2"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
+        {/* ── Generation Progress Banner ── */}
+        {isProcessing && (
+          <div className="glass rounded-2xl p-5 mb-5 border border-primary/20">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Loader2 className="w-4 h-4 text-primary animate-spin" />
+                <span className="text-white font-semibold text-sm">Generating Clips</span>
               </div>
-            )}
+              <span className="text-sm font-bold text-primary">{genProgress.progress}%</span>
+            </div>
 
-            {/* Clip Details */}
-            {selectedClip && (
-              <div className="glass rounded-2xl p-6">
-                <h3 className="text-lg font-semibold text-white mb-4">Clip Details</h3>
-                <div className="space-y-4">
-                  <div>
-                    <label className="text-sm font-medium text-gray-400 uppercase tracking-wide mb-2 block">
-                      Hook
-                    </label>
-                    <p className="text-white">{selectedClip.hook || "No hook identified"}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-400 uppercase tracking-wide mb-2 block">
-                      Transcript
-                    </label>
-                    <p className="text-gray-300 text-sm leading-relaxed">
-                      {selectedClip.transcript_text || "No transcript available"}
-                    </p>
-                  </div>
-                </div>
+            {/* Overall progress bar */}
+            <div className="h-2 bg-muted rounded-full overflow-hidden mb-2">
+              <div
+                className="h-full bg-gradient-purple rounded-full transition-all duration-500"
+                style={{ width: `${genProgress.progress}%` }}
+              />
+            </div>
+
+            <p className="text-xs text-gray-400">{genProgress.message}</p>
+
+            {/* Per-clip pill indicators */}
+            {genProgress.clipsTotal > 0 && (
+              <div className="flex gap-1.5 mt-3">
+                {Array.from({ length: genProgress.clipsTotal }).map((_, i) => (
+                  <div
+                    key={i}
+                    className={`flex-1 h-1.5 rounded-full transition-all duration-300 ${
+                      i < genProgress.clipsCompleted
+                        ? "bg-primary"
+                        : i === genProgress.clipsCompleted
+                        ? "bg-primary/40 animate-pulse"
+                        : "bg-muted"
+                    }`}
+                  />
+                ))}
               </div>
             )}
           </div>
+        )}
 
-          {/* Right Column - Clips List */}
-          <div className="space-y-6">
-            <div className="glass rounded-2xl p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-white">Generated Clips</h3>
-                <span className="text-sm text-gray-400">{clips.length} clips</span>
-              </div>
-
-              <div className="space-y-3 max-h-[700px] overflow-y-auto pr-2">
-                {clips.map((clip, index) => (
-                  <button
-                    key={clip.id}
-                    onClick={() => setSelectedClip(clip)}
-                    className={`w-full text-left p-4 rounded-xl border-2 transition-all ${
-                      selectedClip?.id === clip.id
-                        ? "border-primary bg-primary/10"
-                        : "border-border hover:border-primary/50"
-                    }`}
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className="flex-shrink-0 w-12 h-12 rounded-lg bg-gradient-purple flex items-center justify-center text-white font-bold">
-                        {index + 1}
+        {/* Only show studio grid when we have clips */}
+        {clips.length > 0 ? (
+          <div className="grid grid-cols-3 gap-6">
+            {/* Left Column - Video Player + Details */}
+            <div className="col-span-2 space-y-4">
+              {selectedClip && selectedClip.filename && (
+                <div className="glass rounded-2xl p-5">
+                  {/* Clip header */}
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-gradient-purple flex items-center justify-center text-white text-sm font-bold">
+                        {selectedIndex + 1}
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <h4 className="font-semibold text-white mb-1 truncate">
-                          {clip.hook || `Clip ${index + 1}`}
-                        </h4>
-                        <div className="flex items-center gap-2 text-xs text-gray-400 mb-2">
-                          <span>{clip.duration}s</span>
-                          <span>•</span>
-                          <span>
-                            {formatTime(clip.start_time)} - {formatTime(clip.end_time)}
+                      <div>
+                        <p className="text-white font-semibold text-sm leading-tight">
+                          Clip {selectedIndex + 1} of {clips.length}
+                        </p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <Clock className="w-3 h-3 text-gray-500" />
+                          <span className="text-xs text-gray-400">
+                            {selectedClip.start_time} → {selectedClip.end_time}
                           </span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-gradient-purple"
-                              style={{ width: `${clip.virality_score * 100}%` }}
-                            />
-                          </div>
-                          <span className="text-xs font-semibold text-primary">
-                            {Math.round(clip.virality_score * 100)}%
-                          </span>
+                          <span className="text-gray-600">·</span>
+                          <span className="text-xs text-gray-400">{Math.round(selectedClip.duration)}s</span>
                         </div>
                       </div>
                     </div>
+                    <ScoreBadge score={selectedClip.relevance_score} />
+                  </div>
 
-                    {!clip.filename && (
-                      <div className="mt-3 flex items-center gap-2 text-xs text-yellow-500">
-                        <svg
-                          className="w-4 h-4 animate-spin"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                        >
-                          <circle
-                            className="opacity-25"
-                            cx="12"
-                            cy="12"
-                            r="10"
-                            stroke="currentColor"
-                            strokeWidth="4"
-                          ></circle>
-                          <path
-                            className="opacity-75"
-                            fill="currentColor"
-                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                          ></path>
-                        </svg>
-                        Generating...
+                  {/* Constrained 9:16 video */}
+                  <div className="flex justify-center">
+                    <div className="w-full max-w-[320px]">
+                      <VideoPlayer
+                        src={`${apiUrl}/clips/${selectedClip.filename}`}
+                        aspectRatio="9:16"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-3 mt-4">
+                    <a
+                      href={`${apiUrl}/clips/${selectedClip.filename}`}
+                      download
+                      className="flex-1 h-10 rounded-lg bg-gradient-purple hover:opacity-90 text-white font-semibold transition-all flex items-center justify-center gap-2 text-sm"
+                    >
+                      <Download className="w-4 h-4" />
+                      Download
+                    </a>
+                    <button className="h-10 px-4 rounded-lg bg-muted hover:bg-muted/80 text-white font-semibold transition-all flex items-center justify-center gap-2 text-sm">
+                      <Share2 className="w-4 h-4" />
+                      Share
+                    </button>
+                    <button className="h-10 px-4 rounded-lg bg-muted hover:bg-muted/80 text-white font-semibold transition-all flex items-center justify-center gap-2 text-sm">
+                      <Edit className="w-4 h-4" />
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => handleDeleteClip(selectedClip.id)}
+                      className="h-10 px-4 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-all flex items-center justify-center"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* If selected clip has no file yet */}
+              {selectedClip && !selectedClip.filename && (
+                <div className="glass rounded-2xl p-5 flex flex-col items-center justify-center gap-3 min-h-[300px]">
+                  <Loader2 className="w-8 h-8 text-primary animate-spin" />
+                  <p className="text-gray-400 text-sm">
+                    Clip {selectedIndex + 1} is still being generated…
+                  </p>
+                </div>
+              )}
+
+              {/* Clip Details */}
+              {selectedClip && (
+                <div className="glass rounded-2xl p-5 space-y-4">
+                  <h3 className="text-base font-semibold text-white">
+                    Clip {selectedIndex + 1} Details
+                  </h3>
+
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="bg-muted/50 rounded-xl p-3 text-center">
+                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Relevance</p>
+                      <p className="text-2xl font-bold text-white">
+                        {Math.round(selectedClip.relevance_score * 100)}
+                        <span className="text-sm text-gray-400">%</span>
+                      </p>
+                    </div>
+                    <div className="bg-muted/50 rounded-xl p-3 text-center">
+                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Start</p>
+                      <p className="text-xl font-bold text-white font-mono">{selectedClip.start_time}</p>
+                    </div>
+                    <div className="bg-muted/50 rounded-xl p-3 text-center">
+                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">End</p>
+                      <p className="text-xl font-bold text-white font-mono">{selectedClip.end_time}</p>
+                    </div>
+                  </div>
+
+                  {selectedClip.reasoning && (
+                    <div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <Brain className="w-4 h-4 text-primary" />
+                        <label className="text-xs font-semibold text-primary uppercase tracking-wide">
+                          AI Reasoning
+                        </label>
                       </div>
-                    )}
-                  </button>
-                ))}
-              </div>
+                      <p className="text-gray-300 text-sm leading-relaxed bg-primary/5 border border-primary/15 rounded-xl p-3">
+                        {selectedClip.reasoning}
+                      </p>
+                    </div>
+                  )}
+
+                  {selectedClip.text && (
+                    <div>
+                      <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 block">
+                        Transcript
+                      </label>
+                      <p className="text-gray-400 text-sm leading-relaxed">{selectedClip.text}</p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
-            {/* Bulk Actions */}
-            <div className="glass rounded-xl p-4">
-              <h4 className="text-sm font-semibold text-white mb-3 uppercase tracking-wide">
-                Bulk Actions
-              </h4>
-              <div className="space-y-2">
-                <button className="w-full h-10 rounded-lg bg-muted hover:bg-muted/80 text-white text-sm font-semibold transition-all">
-                  Download All
-                </button>
-                <button className="w-full h-10 rounded-lg bg-muted hover:bg-muted/80 text-white text-sm font-semibold transition-all">
-                  Share All
-                </button>
+            {/* Right Column - Clips List */}
+            <div className="space-y-4">
+              <div className="glass rounded-2xl p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-base font-semibold text-white">Generated Clips</h3>
+                  <span className="text-xs text-gray-500 bg-muted/60 px-2 py-1 rounded-full">
+                    {clips.length} clips
+                  </span>
+                </div>
+
+                <div className="space-y-2.5 max-h-[680px] overflow-y-auto pr-1">
+                  {clips.map((clip, index) => {
+                    const isSelected = selectedClip?.id === clip.id;
+                    const pct = Math.round(clip.relevance_score * 100);
+
+                    return (
+                      <button
+                        key={clip.id}
+                        onClick={() => setSelectedClip(clip)}
+                        className={`w-full text-left p-3.5 rounded-xl border transition-all ${
+                          isSelected
+                            ? "border-primary bg-primary/10 shadow-sm shadow-primary/20"
+                            : "border-border hover:border-primary/40 hover:bg-muted/30"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2.5">
+                            <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0 ${isSelected ? "bg-primary" : "bg-muted"}`}>
+                              {index + 1}
+                            </div>
+                            <div className="flex items-center gap-1 text-xs text-gray-500">
+                              <Clock className="w-3 h-3" />
+                              <span className="font-mono">{clip.start_time}</span>
+                              <ChevronRight className="w-3 h-3" />
+                              <span className="font-mono">{clip.end_time}</span>
+                            </div>
+                          </div>
+                          <ScoreBadge score={clip.relevance_score} />
+                        </div>
+
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="flex-1 h-1 bg-muted rounded-full overflow-hidden">
+                            <div className="h-full bg-gradient-purple rounded-full transition-all" style={{ width: `${pct}%` }} />
+                          </div>
+                          <span className="text-xs text-gray-500">{Math.round(clip.duration)}s</span>
+                        </div>
+
+                        {clip.reasoning && (
+                          <p className="text-xs text-gray-400 leading-snug line-clamp-2">{clip.reasoning}</p>
+                        )}
+
+                        {!clip.filename && (
+                          <div className="mt-2 flex items-center gap-2 text-xs text-yellow-500">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            Generating…
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="glass rounded-xl p-4">
+                <h4 className="text-xs font-semibold text-gray-500 mb-3 uppercase tracking-wide">Bulk Actions</h4>
+                <div className="space-y-2">
+                  <button className="w-full h-9 rounded-lg bg-muted hover:bg-muted/80 text-white text-sm font-medium transition-all">
+                    Download All
+                  </button>
+                  <button className="w-full h-9 rounded-lg bg-muted hover:bg-muted/80 text-white text-sm font-medium transition-all">
+                    Share All
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        ) : (
+          /* Processing but no clips in DB yet */
+          <div className="flex flex-col items-center justify-center py-24 gap-4">
+            <Loader2 className="w-10 h-10 text-primary animate-spin" />
+            <p className="text-gray-400 text-sm">Preparing your clips…</p>
+          </div>
+        )}
       </div>
     </AppLayout>
   );

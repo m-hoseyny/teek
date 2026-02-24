@@ -378,7 +378,8 @@ class TaskService:
                     text=clip_info["text"],
                     relevance_score=clip_info["relevance_score"],
                     reasoning=clip_info["reasoning"],
-                    clip_order=i + 1
+                    clip_order=i + 1,
+                    thumbnail_filename=clip_info.get("thumbnail_filename"),
                 )
                 clip_ids.append(clip_id)
 

@@ -1,15 +1,19 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { Link as LinkIcon, Upload, FileText, Clipboard, Zap, Clock, Video as VideoIcon, Globe } from "lucide-react";
+import { Link as LinkIcon, Upload, FileText, Clipboard, Zap, Video as VideoIcon, Minus, Plus, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useSession } from "@/lib/auth-client";
 import { useRouter } from "next/navigation";
 
+interface Prompt { id: string; name: string; description: string; }
+
 export default function AnalysisPage() {
   const { data: session } = useSession();
   const router = useRouter();
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
   const [videoUrl, setVideoUrl] = useState("");
   const [transcriptionMethod, setTranscriptionMethod] = useState<"ai" | "upload" | "paste">("ai");
   const [fileName, setFileName] = useState<string | null>(null);
@@ -18,6 +22,22 @@ export default function AnalysisPage() {
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const srtInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Clip configuration
+  const [clipsCount, setClipsCount] = useState(5);
+  const [prompts, setPrompts] = useState<Prompt[]>([]);
+  const [promptId, setPromptId] = useState("");
+
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    fetch(`${apiUrl}/tasks/prompts`, { headers: { user_id: session.user.id } })
+      .then((r) => r.json())
+      .then((data) => {
+        setPrompts(data.prompts || []);
+        setPromptId(data.default_prompt_id || "");
+      })
+      .catch(() => {});
+  }, [session?.user?.id, apiUrl]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -64,22 +84,19 @@ export default function AnalysisPage() {
     setError(null);
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
       // Prepare request body for POST /tasks/
       const requestBody: any = {
-        source: {
-          url: videoUrl || fileName, // Use URL or filename
-        },
+        source: { url: videoUrl || fileName },
         caption_options: {
-          pycaps_template: "word-focus", // Default template
+          pycaps_template: "word-focus",
           transitions_enabled: false,
-          transcript_review_enabled: true, // Enable transcript review for editing
+          transcript_review_enabled: true,
         },
         transcription_options: {},
         ai_options: {
-          provider: "openai", // Default AI provider
-          clips_count: 5, // Default number of clips
+          provider: "openai",
+          clips_count: clipsCount,
+          prompt_id: promptId || undefined,
         },
       };
 
@@ -328,6 +345,85 @@ export default function AnalysisPage() {
                   className="w-full p-3 bg-input border border-border rounded-lg text-white placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary resize-none"
                 />
               )}
+            </div>
+          </div>
+        </div>
+
+        {/* Clip Configuration Card */}
+        <div className="glass rounded-2xl p-6 mb-8">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center">
+              <Sparkles className="w-5 h-5 text-primary" />
+            </div>
+            <h2 className="text-xl font-semibold text-white">3. Clip Configuration</h2>
+          </div>
+
+          <div className="grid grid-cols-2 gap-8">
+            {/* Clip Style */}
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-3">CLIP STYLE</label>
+              <div className="grid grid-cols-1 gap-2">
+                {prompts.length === 0 ? (
+                  <div className="h-10 bg-muted/30 rounded-lg animate-pulse" />
+                ) : (
+                  prompts.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => setPromptId(p.id)}
+                      className={`w-full text-left px-4 py-3 rounded-xl border-2 transition-all ${
+                        promptId === p.id
+                          ? "border-primary bg-primary/10"
+                          : "border-border hover:border-primary/40"
+                      }`}
+                    >
+                      <span className="font-semibold text-white text-sm">{p.name}</span>
+                      {p.description && (
+                        <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{p.description}</p>
+                      )}
+                    </button>
+                  ))
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground mt-2">
+                Determines how the AI selects and frames your clips.
+              </p>
+            </div>
+
+            {/* Number of Clips */}
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-3">NUMBER OF CLIPS</label>
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={() => setClipsCount((n) => Math.max(1, n - 1))}
+                  className="w-10 h-10 rounded-lg bg-muted hover:bg-muted/70 text-white flex items-center justify-center transition-colors"
+                >
+                  <Minus className="w-4 h-4" />
+                </button>
+                <div className="flex-1 text-center">
+                  <div className="text-5xl font-bold text-white tabular-nums">{clipsCount}</div>
+                  <div className="text-xs text-gray-500 mt-1">clips</div>
+                </div>
+                <button
+                  onClick={() => setClipsCount((n) => Math.min(20, n + 1))}
+                  className="w-10 h-10 rounded-lg bg-muted hover:bg-muted/70 text-white flex items-center justify-center transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="flex justify-between text-xs text-gray-500 mt-4 px-1">
+                {[1, 5, 10, 15, 20].map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => setClipsCount(n)}
+                    className={`px-2 py-1 rounded transition-colors ${clipsCount === n ? "text-primary font-semibold" : "hover:text-white"}`}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground mt-3">
+                The AI will try to generate up to this many clips from your video.
+              </p>
             </div>
           </div>
         </div>

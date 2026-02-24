@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useSession } from "@/lib/auth-client";
-import { Play, Pause, Eye, EyeOff, Check } from "lucide-react";
+import { Play, Pause, Eye, EyeOff, Check, Scissors } from "lucide-react";
 import { SubtitlePreview } from "@/components/clip/SubtitlePreview";
 
 interface Word {
@@ -21,6 +21,16 @@ interface TranscriptSegment {
   end_ms: number;
   text: string;
   word_count: number;
+}
+
+interface Clip {
+  id: string;
+  start_time: string;
+  end_time: string;
+  duration: number;
+  text: string;
+  relevance_score: number;
+  clip_order: number;
 }
 
 interface TaskData {
@@ -50,6 +60,27 @@ const CAPTION_STYLES = [
   { id: "vibrant",     name: "VIBRANT",     subtitle: "Colorful" },
 ];
 
+const CLIP_COLORS = [
+  "#A855F7", "#3B82F6", "#10B981", "#F59E0B",
+  "#EF4444", "#EC4899", "#14B8A6", "#8B5CF6",
+];
+
+/** Parse "HH:MM:SS", "MM:SS", or float-string → seconds */
+function parseTs(ts: string): number {
+  if (!ts) return 0;
+  const parts = ts.split(":").map(Number);
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  return parseFloat(ts) || 0;
+}
+
+/** Format seconds → MM:SS */
+function formatTime(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+}
+
 export default function ReviewPage() {
   const params = useParams();
   const router = useRouter();
@@ -60,6 +91,7 @@ export default function ReviewPage() {
   const [task, setTask] = useState<TaskData | null>(null);
   const [segments, setSegments] = useState<TranscriptSegment[]>([]);
   const [words, setWords] = useState<Word[]>([]);
+  const [clips, setClips] = useState<Clip[]>([]);
   const [activeTab, setActiveTab] = useState<"insights" | "transcript">("transcript");
   const [selectedStyle, setSelectedStyle] = useState("word-focus");
   const [showSubtitles, setShowSubtitles] = useState(true);
@@ -68,11 +100,14 @@ export default function ReviewPage() {
   const [duration, setDuration] = useState(0);
   const [isGenerating, setIsGenerating] = useState(false);
   const [videoSrc, setVideoSrc] = useState<string | null>(null);
+  const [transitionsEnabled, setTransitionsEnabled] = useState(false);
+  const [aspectRatio, setAspectRatio] = useState<"9:16" | "1:1" | "16:9">("9:16");
+  const [savingClipId, setSavingClipId] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const animFrameRef = useRef<number>();
 
-  // Fetch task + segments + words
+  // Fetch task + segments + words + clips
   useEffect(() => {
     if (!session?.user?.id || !taskId) return;
     const uid = session.user.id;
@@ -106,10 +141,19 @@ export default function ReviewPage() {
       }
     };
 
+    const fetchClips = async () => {
+      const res = await fetch(`${apiUrl}/tasks/${taskId}/clips`, { headers: { user_id: uid } });
+      if (res.ok) {
+        const data = await res.json();
+        setClips(data.clips || []);
+      }
+    };
+
     fetchTask();
     fetchSegments();
     fetchWords();
     fetchVideo();
+    fetchClips();
   }, [taskId, session?.user?.id, apiUrl]);
 
   // Smooth currentTime updates via requestAnimationFrame
@@ -141,17 +185,15 @@ export default function ReviewPage() {
     setCurrentTime(time);
   };
 
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  const seekTo = (seconds: number) => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = seconds;
+      setCurrentTime(seconds);
+    }
   };
 
   const handleSegmentClick = (segment: TranscriptSegment) => {
-    if (videoRef.current) {
-      videoRef.current.currentTime = segment.start_ms / 1000;
-      setCurrentTime(segment.start_ms / 1000);
-    }
+    seekTo(segment.start_ms / 1000);
   };
 
   const handleSegmentEdit = (id: number, newText: string) => {
@@ -173,6 +215,51 @@ export default function ReviewPage() {
     }
   };
 
+  const handleAdjustClipTime = async (
+    clip: Clip,
+    field: "start" | "end",
+    deltaSeconds: number
+  ) => {
+    const startSec = parseTs(clip.start_time);
+    const endSec = parseTs(clip.end_time);
+
+    let newStart = startSec;
+    let newEnd = endSec;
+
+    if (field === "start") {
+      newStart = Math.max(0, startSec + deltaSeconds);
+      // keep at least 5s clip and don't overlap end
+      if (newStart >= newEnd - 5) return;
+    } else {
+      newEnd = endSec + deltaSeconds;
+      if (duration > 0) newEnd = Math.min(duration, newEnd);
+      // keep at least 5s clip
+      if (newEnd <= newStart + 5) return;
+    }
+
+    // Optimistic update
+    setClips((prev) =>
+      prev.map((c) =>
+        c.id === clip.id
+          ? { ...c, start_time: String(newStart), end_time: String(newEnd), duration: newEnd - newStart }
+          : c
+      )
+    );
+
+    setSavingClipId(clip.id);
+    try {
+      await fetch(`${apiUrl}/tasks/${taskId}/clips/${clip.id}/time`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", user_id: session!.user.id },
+        body: JSON.stringify({ start_time: String(newStart), end_time: String(newEnd) }),
+      });
+    } catch (error) {
+      console.error("Failed to update clip time:", error);
+    } finally {
+      setSavingClipId(null);
+    }
+  };
+
   const handleGenerateClips = async () => {
     if (!session?.user?.id) return;
     setIsGenerating(true);
@@ -181,6 +268,7 @@ export default function ReviewPage() {
       const response = await fetch(`${apiUrl}/tasks/${taskId}/generate-clips`, {
         method: "POST",
         headers: { "Content-Type": "application/json", user_id: session.user.id },
+        body: JSON.stringify({ transitions_enabled: transitionsEnabled, aspect_ratio: aspectRatio }),
       });
       if (response.ok) router.push(`/studio/${taskId}`);
     } catch (error) {
@@ -256,11 +344,53 @@ export default function ReviewPage() {
                   />
                 )}
 
+                {/* Ratio crop preview overlay */}
+                {(() => {
+                  // Player is 16:9. Calculate side-bar widths for each output ratio.
+                  // crop_w / player_w = target_ratio / (16/9)
+                  const ratioMap: Record<string, number> = {
+                    "9:16": (9 / 16) / (16 / 9), // ≈ 31.64 %
+                    "1:1":  1        / (16 / 9),  // = 56.25 %
+                    "16:9": 1,                     // full width
+                  };
+                  const cropFrac = ratioMap[aspectRatio] ?? 1;
+                  if (cropFrac >= 1) return null;
+                  const sideBarPct = ((1 - cropFrac) / 2) * 100;
+                  const centerPct  = cropFrac * 100;
+                  return (
+                    <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 5 }}>
+                      {/* Left dark bar */}
+                      <div
+                        className="absolute top-0 left-0 bottom-0 bg-black/55"
+                        style={{ width: `${sideBarPct}%` }}
+                      />
+                      {/* Right dark bar */}
+                      <div
+                        className="absolute top-0 right-0 bottom-0 bg-black/55"
+                        style={{ width: `${sideBarPct}%` }}
+                      />
+                      {/* Safe-zone border */}
+                      <div
+                        className="absolute top-0 bottom-0 border-x-2 border-white/30 border-dashed"
+                        style={{ left: `${sideBarPct}%`, width: `${centerPct}%` }}
+                      />
+                      {/* Label */}
+                      <div
+                        className="absolute top-2 flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold text-white/90 bg-black/50 border border-white/20"
+                        style={{ left: `calc(${sideBarPct}% + 6px)` }}
+                      >
+                        <span>{aspectRatio}</span>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {/* Play button overlay */}
                 {!isPlaying && videoSrc && (
                   <button
                     onClick={handlePlayPause}
                     className="absolute inset-0 flex items-center justify-center"
+                    style={{ zIndex: 10 }}
                   >
                     <div className="w-20 h-20 rounded-full bg-gradient-purple flex items-center justify-center glow-purple">
                       <Play className="w-10 h-10 text-white ml-1" fill="currentColor" />
@@ -269,7 +399,7 @@ export default function ReviewPage() {
                 )}
 
                 {/* Controls overlay */}
-                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4">
+                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4" style={{ zIndex: 10 }}>
                   <div className="flex items-center gap-3 mb-2">
                     <button onClick={handlePlayPause} className="text-white hover:text-primary transition-colors">
                       {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
@@ -294,57 +424,165 @@ export default function ReviewPage() {
               </div>
             </div>
 
-            {/* Virality Heatmap */}
+            {/* Clip Timeline */}
             <div className="glass rounded-2xl p-6">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
-                    <svg className="w-4 h-4 text-primary" fill="currentColor" viewBox="0 0 16 16">
-                      <path d="M8.5 2.687c.654-.689 1.782-.886 3.112-.752 1.234.124 2.503.523 3.388.893v9.923c-.918-.35-2.107-.692-3.287-.81-1.094-.111-2.278-.039-3.213.492V2.687zM8 1.783C7.015.936 5.587.81 4.287.94c-1.514.153-3.042.672-3.994 1.105A.5.5 0 0 0 0 2.5v11a.5.5 0 0 0 .707.455c.882-.4 2.303-.881 3.68-1.02 1.409-.142 2.59.087 3.223.877a.5.5 0 0 0 .78 0c.633-.79 1.814-1.019 3.222-.877 1.378.139 2.8.62 3.681 1.02A.5.5 0 0 0 16 13.5v-11a.5.5 0 0 0-.293-.455c-.952-.433-2.48-.952-3.994-1.105C10.413.809 8.985.936 8 1.783z"/>
-                    </svg>
+                    <Scissors className="w-4 h-4 text-primary" />
                   </div>
-                  <h3 className="font-semibold text-white">Virality Heatmap</h3>
+                  <h3 className="font-semibold text-white">Clip Timeline</h3>
                 </div>
-                <span className="text-xs font-semibold text-red-400 px-2 py-1 rounded bg-red-400/20">
-                  PEAK: 01:32
-                </span>
+                {clips.length > 0 && (
+                  <span className="text-xs font-semibold text-primary px-2 py-1 rounded bg-primary/20">
+                    {clips.length} clip{clips.length !== 1 ? "s" : ""}
+                  </span>
+                )}
               </div>
 
-              <div className="relative h-16 rounded-lg overflow-hidden">
-                <div className="absolute inset-0 flex">
-                  {Array.from({ length: 20 }).map((_, i) => {
-                    const height = Math.sin(i * 0.5) * 40 + 60;
-                    const colors = ["#22c55e", "#84cc16", "#facc15", "#fb923c", "#ef4444"];
-                    const colorIndex = Math.floor((height / 100) * colors.length);
-                    const timeAtSegment = (i / 20) * duration;
+              {/* Timeline bar */}
+              <div className="relative h-10 bg-gray-800 rounded-lg overflow-hidden mb-1">
+                {/* Clip blocks */}
+                {duration > 0 && clips.map((clip, i) => {
+                  const startSec = parseTs(clip.start_time);
+                  const endSec = parseTs(clip.end_time);
+                  const left = (startSec / duration) * 100;
+                  const width = Math.max(((endSec - startSec) / duration) * 100, 0.5);
+                  const color = CLIP_COLORS[i % CLIP_COLORS.length];
+                  return (
+                    <div
+                      key={clip.id}
+                      className="absolute top-0 bottom-0 cursor-pointer hover:brightness-125 transition-all flex items-center justify-center group"
+                      style={{ left: `${left}%`, width: `${width}%`, backgroundColor: color }}
+                      onClick={() => seekTo(startSec)}
+                      title={`Clip ${i + 1}: ${formatTime(startSec)} → ${formatTime(endSec)}`}
+                    >
+                      <span className="text-white text-xs font-bold drop-shadow">{i + 1}</span>
+                    </div>
+                  );
+                })}
+
+                {/* Playhead */}
+                {duration > 0 && (
+                  <div
+                    className="absolute top-0 bottom-0 w-0.5 bg-white/90 pointer-events-none z-10"
+                    style={{ left: `${(currentTime / duration) * 100}%` }}
+                  />
+                )}
+
+                {/* Empty state */}
+                {clips.length === 0 && (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <span className="text-xs text-gray-500">No clips yet</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Time axis */}
+              <div className="flex justify-between text-xs text-gray-500 mb-5 px-0.5">
+                <span>00:00</span>
+                <span>{formatTime(duration * 0.25)}</span>
+                <span>{formatTime(duration * 0.5)}</span>
+                <span>{formatTime(duration * 0.75)}</span>
+                <span>{formatTime(duration)}</span>
+              </div>
+
+              {/* Clip time editor */}
+              {clips.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs text-gray-400 uppercase tracking-wide font-semibold mb-3">Edit Clip Timing</p>
+                  {clips.map((clip, i) => {
+                    const startSec = parseTs(clip.start_time);
+                    const endSec = parseTs(clip.end_time);
+                    const clipDur = endSec - startSec;
+                    const color = CLIP_COLORS[i % CLIP_COLORS.length];
+                    const isSaving = savingClipId === clip.id;
+                    const isActive = currentTime >= startSec && currentTime <= endSec;
+
                     return (
                       <div
-                        key={i}
-                        className="flex-1 cursor-pointer hover:opacity-80 transition-opacity"
-                        style={{
-                          backgroundColor: colors[colorIndex],
-                          height: `${height}%`,
-                          alignSelf: "flex-end",
-                        }}
-                        onClick={() => {
-                          if (videoRef.current) {
-                            videoRef.current.currentTime = timeAtSegment;
-                            setCurrentTime(timeAtSegment);
-                          }
-                        }}
-                        title={`Jump to ${formatTime(timeAtSegment)}`}
-                      />
+                        key={clip.id}
+                        className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-colors cursor-pointer ${
+                          isActive
+                            ? "border-primary/40 bg-primary/5"
+                            : "border-border/50 hover:border-border bg-muted/20 hover:bg-muted/40"
+                        }`}
+                        onClick={() => seekTo(startSec)}
+                      >
+                        {/* Color badge */}
+                        <div
+                          className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0"
+                          style={{ backgroundColor: color }}
+                        >
+                          {i + 1}
+                        </div>
+
+                        {/* Start time controls */}
+                        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            onClick={() => handleAdjustClipTime(clip, "start", -5)}
+                            className="w-5 h-5 rounded text-gray-400 hover:text-white hover:bg-muted text-xs font-bold transition-colors flex items-center justify-center"
+                            title="Start -5s"
+                          >
+                            −
+                          </button>
+                          <span className="font-mono text-sm text-white min-w-[38px] text-center">
+                            {formatTime(startSec)}
+                          </span>
+                          <button
+                            onClick={() => handleAdjustClipTime(clip, "start", +5)}
+                            className="w-5 h-5 rounded text-gray-400 hover:text-white hover:bg-muted text-xs font-bold transition-colors flex items-center justify-center"
+                            title="Start +5s"
+                          >
+                            +
+                          </button>
+                        </div>
+
+                        <span className="text-gray-500 text-xs">→</span>
+
+                        {/* End time controls */}
+                        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            onClick={() => handleAdjustClipTime(clip, "end", -5)}
+                            className="w-5 h-5 rounded text-gray-400 hover:text-white hover:bg-muted text-xs font-bold transition-colors flex items-center justify-center"
+                            title="End -5s"
+                          >
+                            −
+                          </button>
+                          <span className="font-mono text-sm text-white min-w-[38px] text-center">
+                            {formatTime(endSec)}
+                          </span>
+                          <button
+                            onClick={() => handleAdjustClipTime(clip, "end", +5)}
+                            className="w-5 h-5 rounded text-gray-400 hover:text-white hover:bg-muted text-xs font-bold transition-colors flex items-center justify-center"
+                            title="End +5s"
+                          >
+                            +
+                          </button>
+                        </div>
+
+                        {/* Duration badge */}
+                        <span
+                          className="text-xs font-mono px-1.5 py-0.5 rounded shrink-0"
+                          style={{ color, backgroundColor: `${color}20` }}
+                        >
+                          {clipDur.toFixed(0)}s
+                        </span>
+
+                        {/* Clip text snippet */}
+                        <span className="text-xs text-gray-500 truncate flex-1 hidden sm:block">
+                          {clip.text?.substring(0, 50)}{clip.text?.length > 50 ? "…" : ""}
+                        </span>
+
+                        {/* Saving indicator */}
+                        {isSaving && (
+                          <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin shrink-0" />
+                        )}
+                      </div>
                     );
                   })}
                 </div>
-                <div className="absolute -bottom-5 left-0 right-0 flex justify-between text-xs text-gray-500 pointer-events-none">
-                  <span>00:00</span>
-                  <span>{formatTime(duration * 0.25)}</span>
-                  <span>{formatTime(duration * 0.5)}</span>
-                  <span>{formatTime(duration * 0.75)}</span>
-                  <span>{formatTime(duration)}</span>
-                </div>
-              </div>
+              )}
             </div>
 
             {/* Action Buttons */}
@@ -450,6 +688,62 @@ export default function ReviewPage() {
               <p className="text-xs text-gray-500 mt-3">
                 Select a style to preview it live on the video above.
               </p>
+            </div>
+
+            {/* Aspect Ratio */}
+            <div className="glass rounded-2xl p-6">
+              <h3 className="font-semibold text-white uppercase tracking-wide mb-4">Clip Ratio</h3>
+              <div className="flex gap-3">
+                {(
+                  [
+                    { value: "9:16", label: "9:16", desc: "Vertical", visual: "h-12 w-7" },
+                    { value: "1:1",  label: "1:1",  desc: "Square",   visual: "h-9 w-9"  },
+                    { value: "16:9", label: "16:9", desc: "Landscape", visual: "h-7 w-12" },
+                  ] as const
+                ).map(({ value, label, desc, visual }) => (
+                  <button
+                    key={value}
+                    onClick={() => setAspectRatio(value)}
+                    className={`flex-1 flex flex-col items-center gap-2 py-3 px-2 rounded-xl border-2 transition-all ${
+                      aspectRatio === value
+                        ? "border-primary bg-primary/10 glow-purple"
+                        : "border-border hover:border-primary/50"
+                    }`}
+                  >
+                    <div
+                      className={`${visual} rounded border-2 ${
+                        aspectRatio === value ? "border-primary bg-primary/20" : "border-gray-500 bg-muted"
+                      }`}
+                    />
+                    <span className="text-xs font-bold text-white">{label}</span>
+                    <span className="text-xs text-gray-400">{desc}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Transitions Toggle */}
+            <div className="glass rounded-2xl p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-semibold text-white">Transition Effects</h3>
+                  <p className="text-xs text-gray-400 mt-0.5">Add cinematic transitions between clips</p>
+                </div>
+                <button
+                  onClick={() => setTransitionsEnabled((v) => !v)}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+                    transitionsEnabled ? "bg-primary" : "bg-muted"
+                  }`}
+                  role="switch"
+                  aria-checked={transitionsEnabled}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                      transitionsEnabled ? "translate-x-6" : "translate-x-1"
+                    }`}
+                  />
+                </button>
+              </div>
             </div>
 
             {/* Export Health */}

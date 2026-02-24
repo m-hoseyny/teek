@@ -464,6 +464,7 @@ class VideoService:
         progress_callback: Optional[callable] = None,
         add_subtitles: bool = False,
         caption_options: Optional[Dict[str, Any]] = None,
+        target_ratio: float = 9 / 16,
     ) -> Dict[str, Any]:
         """
         Create video clips from segments.
@@ -499,6 +500,10 @@ class VideoService:
                         "stage": "clips",
                         "stage_progress": stage_progress,
                         "overall_progress": overall_progress,
+                        "step": 4,
+                        "step_name": "virality_analysis",
+                        "clips_completed": completed,
+                        "clips_total": total,
                     },
                 ),
                 loop,
@@ -510,11 +515,13 @@ class VideoService:
             video_path=video_path,
             segments=segments,
             output_dir=clips_output_dir,
+            use_pycaps=bool(pycaps_template),
             pycaps_template=pycaps_template,
             diagnostics=render_diagnostics,
             progress_callback=on_clip_progress,
             add_subtitles=add_subtitles,
             caption_options=caption_options,
+            target_ratio=target_ratio,
         )
         if not transitions_enabled:
             render_diagnostics["transitions_disabled"] = True

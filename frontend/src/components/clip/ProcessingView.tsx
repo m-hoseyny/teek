@@ -33,9 +33,11 @@ const STEP_MAPPING: Record<string, number> = {
   extract_audio: 1,
   transcript: 2,
   transcribe: 2,
+  transcription: 2,
   analysis: 3,
   analyze: 3,
   clips: 3,
+  virality_analysis: 3,
 };
 
 export function ProcessingView({ taskStatus }: ProcessingViewProps) {

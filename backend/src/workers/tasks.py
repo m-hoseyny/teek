@@ -386,6 +386,7 @@ async def transcribe_video_task(
                     clip_order=i + 1,
                     words_json=_json.dumps(clip_info.get("words", []), ensure_ascii=False),
                     pycaps_template=pycaps_template,
+                    thumbnail_filename=clip_info.get("thumbnail_filename"),
                 )
                 clip_ids.append(clip_id)
 
@@ -658,12 +659,17 @@ async def generate_clips_from_transcript(
             # Create the clips WITHOUT subtitles (subtitles added on-demand during export)
             task_metadata = task.get("metadata") or {}
             pycaps_template = task_metadata.get("pycaps_template", "word-focus")
+            transitions_enabled = task_metadata.get("transitions_enabled", False)
+            RATIO_MAP = {"9:16": 9 / 16, "1:1": 1.0, "16:9": 16 / 9}
+            target_ratio = RATIO_MAP.get(task_metadata.get("aspect_ratio", "9:16"), 9 / 16)
             clips_result = await VideoService.create_video_clips(
                 video_path=Path(video_path),
                 segments=segments,
                 pycaps_template=pycaps_template,
+                transitions_enabled=transitions_enabled,
                 progress_callback=lambda p, m, meta=None: progress.update(p, m, metadata=meta),
                 add_subtitles=False,
+                target_ratio=target_ratio,
             )
 
             # Update clip records with actual file paths, durations, and word-level data

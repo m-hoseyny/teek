@@ -40,6 +40,7 @@ class ClipRepository:
         clip_order: int,
         words_json: str | None = None,
         pycaps_template: str | None = None,
+        thumbnail_filename: str | None = None,
     ) -> str:
         """Create a new clip record and return its ID."""
         result = await db.execute(
@@ -47,11 +48,11 @@ class ClipRepository:
                 INSERT INTO generated_clips
                 (task_id, filename, file_path, start_time, end_time, duration,
                  text, relevance_score, reasoning, clip_order,
-                 words_json, pycaps_template, created_at)
+                 words_json, pycaps_template, thumbnail_filename, created_at)
                 VALUES
                 (:task_id, :filename, :file_path, :start_time, :end_time, :duration,
                  :text, :relevance_score, :reasoning, :clip_order,
-                 :words_json, :pycaps_template, NOW())
+                 :words_json, :pycaps_template, :thumbnail_filename, NOW())
                 RETURNING id
             """),
             {
@@ -67,6 +68,7 @@ class ClipRepository:
                 "clip_order": clip_order,
                 "words_json": words_json,
                 "pycaps_template": pycaps_template or "word-focus",
+                "thumbnail_filename": thumbnail_filename,
             }
         )
         clip_id = result.scalar()
@@ -80,7 +82,7 @@ class ClipRepository:
             sql_text("""
                 SELECT id, filename, file_path, start_time, end_time, duration,
                        text, relevance_score, reasoning, clip_order, created_at,
-                       words_json, pycaps_template, rendered_file_path
+                       words_json, pycaps_template, rendered_file_path, thumbnail_filename
                 FROM generated_clips
                 WHERE task_id = :task_id
                 ORDER BY clip_order ASC
@@ -112,6 +114,7 @@ class ClipRepository:
                 "clip_order": row.clip_order,
                 "created_at": row.created_at.isoformat(),
                 "video_url": f"/clips/{row.filename}",
+                "thumbnail_filename": row.thumbnail_filename,
                 "words": words,
                 "pycaps_template": row.pycaps_template or "word-focus",
                 "rendered_url": f"/clips/{Path(row.rendered_file_path).name}" if row.rendered_file_path else None,
@@ -148,7 +151,7 @@ class ClipRepository:
         params = {"clip_id": clip_id}
 
         for key, value in updates.items():
-            if key in ["filename", "file_path", "start_time", "end_time", "duration", "text", "relevance_score", "reasoning", "clip_order", "words_json", "pycaps_template", "rendered_file_path"]:
+            if key in ["filename", "file_path", "start_time", "end_time", "duration", "text", "relevance_score", "reasoning", "clip_order", "words_json", "pycaps_template", "rendered_file_path", "thumbnail_filename"]:
                 set_parts.append(f"{key} = :{key}")
                 params[key] = value
 

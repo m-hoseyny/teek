@@ -150,6 +150,7 @@ class GeneratedClip(Base):
     relevance_score: Mapped[float] = mapped_column(Float, nullable=False)
     reasoning: Mapped[Optional[str]] = mapped_column(Text, nullable=True) # AI reasoning for selection
     clip_order: Mapped[int] = mapped_column(Integer, nullable=False)     # Order within the task
+    thumbnail_filename: Mapped[Optional[str]] = mapped_column(String(255), nullable=True) # JPEG thumbnail filename
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

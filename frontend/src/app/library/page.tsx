@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { Play, Download, Share2, ChevronDown, ChevronRight, Search } from "lucide-react";
+import Link from "next/link";
+import { Play, Download, Share2, ChevronDown, ChevronRight, Search, Clapperboard } from "lucide-react";
 import { ClipModal } from "@/components/clip/ClipModal";
 import { useSession } from "@/lib/auth-client";
 
@@ -132,7 +133,7 @@ export default function LibraryPage() {
             virality: clip.virality_score || Math.floor(Math.random() * 30 + 70),
             quality: "HD",
             videoUrl: `${apiUrl}/clips/${clip.filename}`,
-            thumbnail: clip.thumbnail,
+            thumbnail: clip.thumbnail_filename ? `${apiUrl}/clips/${clip.thumbnail_filename}` : undefined,
             description: clip.description || "AI-generated viral clip",
             createdAt: new Date(clip.created_at || Date.now()).toLocaleDateString(),
             aspectRatio: clip.aspect_ratio || "9:16",
@@ -332,8 +333,8 @@ export default function LibraryPage() {
                     </div>
                   </div>
 
-                  {/* Status Badge */}
-                  <div>
+                  {/* Status Badge + Studio Link */}
+                  <div className="flex items-center gap-3">
                     {project.status === "completed" && (
                       <span className="px-3 py-1 rounded-full bg-green-400/20 text-green-400 text-xs font-semibold">
                         Completed
@@ -348,6 +349,16 @@ export default function LibraryPage() {
                       <span className="px-3 py-1 rounded-full bg-red-400/20 text-red-400 text-xs font-semibold">
                         Failed
                       </span>
+                    )}
+                    {project.status === "completed" && (
+                      <Link
+                        href={`/studio/${project.id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/15 hover:bg-primary/30 text-primary text-xs font-semibold transition-colors border border-primary/20"
+                      >
+                        <Clapperboard className="w-3.5 h-3.5" />
+                        Open in Studio
+                      </Link>
                     )}
                   </div>
                 </button>

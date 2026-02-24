@@ -104,6 +104,7 @@ CREATE TABLE generated_clips (
     words_json TEXT,                 -- Word-level timing data JSON for client-side subtitle preview
     pycaps_template VARCHAR(50) DEFAULT 'word-focus', -- Per-clip caption template
     rendered_file_path VARCHAR(500), -- Path to final rendered clip with subtitles (null until exported)
+    thumbnail_filename VARCHAR(255),  -- Filename of auto-generated JPEG thumbnail
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );

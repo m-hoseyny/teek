@@ -1518,6 +1518,7 @@ def create_optimized_clip(
     error_collector: Optional[List[str]] = None,
     use_pycaps: bool = False,
     pycaps_template: Optional[str] = None,
+    target_ratio: float = 9 / 16,
 ) -> bool:
     """Create optimized 9:16 clip with word-timed subtitles."""
     try:
@@ -1533,12 +1534,11 @@ def create_optimized_clip(
         # Check if we should use PyCaps for animated subtitles
         if use_pycaps and pycaps_template:
             try:
-                from .services.pycaps_service import get_pycaps_service
-                pycaps_service = get_pycaps_service()
-                
+                from .pycaps_renderer import build_pycaps_transcript, render_pycaps_subtitles
+
                 # First, create the clip without subtitles
                 temp_output = output_path.with_suffix('.temp.mp4')
-                
+
                 # Load and process video
                 video = VideoFileClip(str(video_path))
 
@@ -1552,7 +1552,7 @@ def create_optimized_clip(
 
                 # Get optimal crop
                 x_offset, y_offset, new_width, new_height = detect_optimal_crop_region(
-                    video, start_time, end_time, target_ratio=9/16
+                    video, start_time, end_time, target_ratio=target_ratio
                 )
 
                 cropped_clip = clip.cropped(
@@ -1563,7 +1563,7 @@ def create_optimized_clip(
                 # Write temporary clip without subtitles
                 processor = VideoProcessor(font_family, font_size, font_color)
                 encoding_settings = processor.get_optimal_encoding_settings("high")
-                
+
                 cropped_clip.write_videofile(
                     str(temp_output),
                     temp_audiofile='temp-audio.m4a',
@@ -1576,27 +1576,33 @@ def create_optimized_clip(
                 cropped_clip.close()
                 clip.close()
                 video.close()
-                
-                # Now apply PyCaps subtitles
-                success = pycaps_service.render_subtitles(
-                    video_path=temp_output,
+
+                # Load word-level transcript from the original video and build pycaps format
+                transcript_data = load_cached_transcript_data(video_path)
+                words = transcript_data.get("words", []) if transcript_data else []
+                clip_start_ms = int(start_time * 1000)
+                clip_end_ms = int(end_time * 1000)
+                pycaps_transcript = build_pycaps_transcript(words, clip_start_ms, clip_end_ms)
+
+                # Apply PyCaps subtitles onto the cropped clip
+                success = render_pycaps_subtitles(
+                    clip_path=temp_output,
                     output_path=output_path,
-                    template_id=pycaps_template,
-                    start_time=0,
-                    end_time=duration
+                    transcript=pycaps_transcript,
+                    template=pycaps_template,
                 )
-                
+
                 # Clean up temp file
                 if temp_output.exists():
                     temp_output.unlink()
-                
+
                 if success:
                     logger.info(f"Successfully created clip with PyCaps: {output_path}")
                     return True
                 else:
                     logger.warning(f"PyCaps rendering failed, falling back to standard subtitles")
                     # Fall through to standard subtitle rendering
-                    
+
             except ImportError:
                 logger.warning("PyCaps not available, using standard subtitles")
             except Exception as e:
@@ -1616,7 +1622,7 @@ def create_optimized_clip(
 
         # Get optimal crop
         x_offset, y_offset, new_width, new_height = detect_optimal_crop_region(
-            video, start_time, end_time, target_ratio=9/16
+            video, start_time, end_time, target_ratio=target_ratio
         )
 
         cropped_clip = clip.cropped(
@@ -1669,6 +1675,27 @@ def create_optimized_clip(
             error_collector.append(str(e))
         return False
 
+def generate_clip_thumbnail(clip_path: Path, output_path: Path) -> bool:
+    """Extract a JPEG thumbnail from a clip at ~20% of its duration (max 2s in)."""
+    try:
+        cap = cv2.VideoCapture(str(clip_path))
+        if not cap.isOpened():
+            return False
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        target_frame = max(1, min(int(total_frames * 0.2), int(fps * 2)))
+        cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+        ret, frame = cap.read()
+        cap.release()
+        if ret:
+            cv2.imwrite(str(output_path), frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            return True
+        return False
+    except Exception as e:
+        logger.warning(f"Failed to generate thumbnail for {clip_path}: {e}")
+        return False
+
+
 def create_clips_from_segments(
     video_path: Union[Path, str],
     segments: List[Dict[str, Any]],
@@ -1683,6 +1710,7 @@ def create_clips_from_segments(
     pycaps_template: Optional[str] = None,
     add_subtitles: bool = False,
     caption_options: Optional[Dict[str, Any]] = None,
+    target_ratio: float = 9 / 16,
 ) -> List[Dict[str, Any]]:
     """Create optimized video clips from segments."""
     video_path = Path(video_path)
@@ -1728,6 +1756,7 @@ def create_clips_from_segments(
                 error_collector=clip_errors,
                 use_pycaps=use_pycaps,
                 pycaps_template=pycaps_template,
+                target_ratio=target_ratio,
             )
 
             if success:
@@ -1748,6 +1777,11 @@ def create_clips_from_segments(
                                 "end": min(clip_end_ms - clip_start_ms, w_end - clip_start_ms),
                             })
 
+                thumb_filename = clip_filename.replace('.mp4', '_thumb.jpg')
+                thumb_path = output_dir / thumb_filename
+                if not generate_clip_thumbnail(clip_path, thumb_path):
+                    thumb_filename = None
+
                 clip_info = {
                     "clip_id": i + 1,
                     "filename": clip_filename,
@@ -1759,6 +1793,7 @@ def create_clips_from_segments(
                     "relevance_score": segment['relevance_score'],
                     "reasoning": segment['reasoning'],
                     "words": clip_words,
+                    "thumbnail_filename": thumb_filename,
                 }
                 clips_info.append(clip_info)
                 logger.info(f"Created clip {i+1}: {duration:.1f}s")
@@ -1886,6 +1921,7 @@ def create_clips_with_transitions(
     pycaps_template: Optional[str] = None,
     add_subtitles: bool = False,
     caption_options: Optional[Dict[str, Any]] = None,
+    target_ratio: float = 9 / 16,
 ) -> List[Dict[str, Any]]:
     """Create video clips with transition effects between them."""
     video_path = Path(video_path)
@@ -1908,6 +1944,7 @@ def create_clips_with_transitions(
         pycaps_template=pycaps_template,
         add_subtitles=add_subtitles,
         caption_options=caption_options,
+        target_ratio=target_ratio,
     )
 
     if len(clips_info) < 2:

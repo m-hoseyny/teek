@@ -3,6 +3,7 @@ Clip API routes for task clip management.
 """
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 import json
 import logging
@@ -227,6 +228,12 @@ async def generate_clips_from_transcript(task_id: str, request: Request, db: Asy
         raise HTTPException(status_code=401, detail="User authentication required")
 
     try:
+        # Parse optional body
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
         task_service = TaskService(db)
         task = await task_service.task_repo.get_task_by_id(db, task_id)
 
@@ -243,6 +250,24 @@ async def generate_clips_from_transcript(task_id: str, request: Request, db: Asy
         clips = await task_service.clip_repo.get_clips_by_task(db, task_id)
         if not clips:
             raise HTTPException(status_code=400, detail="No clips found for this task")
+
+        # Merge body options (transitions_enabled, aspect_ratio) into task metadata
+        VALID_RATIOS = {"9:16", "1:1", "16:9"}
+        metadata_updates: dict = {}
+        if "transitions_enabled" in body:
+            metadata_updates["transitions_enabled"] = bool(body["transitions_enabled"])
+        if "aspect_ratio" in body and body["aspect_ratio"] in VALID_RATIOS:
+            metadata_updates["aspect_ratio"] = body["aspect_ratio"]
+
+        if metadata_updates:
+            existing_metadata = task.get("metadata") or {}
+            existing_metadata.update(metadata_updates)
+            await db.execute(
+                text("UPDATE tasks SET task_metadata = :metadata, updated_at = NOW() WHERE id = :task_id"),
+                {"metadata": json.dumps(existing_metadata), "task_id": task_id},
+            )
+            await db.commit()
+            logger.info(f"Updated task metadata for {task_id}: {metadata_updates}")
 
         # Update task status to processing
         await task_service.task_repo.update_task_status(
