@@ -29,6 +29,7 @@ interface TaskData {
   status: string;
   source: { title: string; url: string };
   clips: Clip[];
+  metadata?: { aspect_ratio?: string };
 }
 
 interface GenProgress {
@@ -370,15 +371,21 @@ export default function StudioPage() {
                     <ScoreBadge score={selectedClip.relevance_score} />
                   </div>
 
-                  {/* Constrained 9:16 video */}
-                  <div className="flex justify-center">
-                    <div className="w-full max-w-[320px]">
-                      <VideoPlayer
-                        src={`${apiUrl}/clips/${selectedClip.filename}`}
-                        aspectRatio="9:16"
-                      />
-                    </div>
-                  </div>
+                  {/* Video player sized to match clip aspect ratio */}
+                  {(() => {
+                    const ar = (task?.metadata?.aspect_ratio ?? "9:16") as "9:16" | "1:1" | "16:9";
+                    const maxW = ar === "16:9" ? "max-w-full" : ar === "1:1" ? "max-w-[420px]" : "max-w-[320px]";
+                    return (
+                      <div className="flex justify-center">
+                        <div className={`w-full ${maxW}`}>
+                          <VideoPlayer
+                            src={`${apiUrl}/clips/${selectedClip.filename}`}
+                            aspectRatio={ar}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Actions */}
                   <div className="flex items-center gap-3 mt-4">
