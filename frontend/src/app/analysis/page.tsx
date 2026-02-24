@@ -84,15 +84,32 @@ export default function AnalysisPage() {
     setError(null);
 
     try {
+      // Upload the file first if one was selected
+      let resolvedVideoUrl = videoUrl;
+      if (!videoUrl && fileInputRef.current?.files?.[0]) {
+        const formData = new FormData();
+        formData.append("video", fileInputRef.current.files[0]);
+        const uploadRes = await fetch(`${apiUrl}/upload`, {
+          method: "POST",
+          body: formData,
+        });
+        if (!uploadRes.ok) {
+          const uploadErr = await uploadRes.json().catch(() => ({}));
+          throw new Error(uploadErr.detail || "Failed to upload video");
+        }
+        const uploadData = await uploadRes.json();
+        resolvedVideoUrl = uploadData.video_path;
+      }
+
       // Prepare request body for POST /tasks/
       const requestBody: any = {
-        source: { url: videoUrl || fileName },
+        source: { url: resolvedVideoUrl || fileName },
         caption_options: {
           pycaps_template: "word-focus",
           transitions_enabled: false,
           transcript_review_enabled: true,
         },
-        transcription_options: {},
+        transcription_options: { provider: "assemblyai" },
         ai_options: {
           provider: "openai",
           clips_count: clipsCount,
