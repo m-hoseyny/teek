@@ -85,7 +85,7 @@ export function EditorView() {
             </div>
 
             {/* Virality Heatmap */}
-            <div className="glass rounded-xl p-4 border border-purple-500/30">
+            <div className="glass rounded-xl p-4 border border-blue-500/30">
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <svg className="w-5 h-5 text-primary" fill="currentColor" viewBox="0 0 16 16">

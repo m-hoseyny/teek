@@ -3,6 +3,7 @@ import { Inconsolata } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import ThemeToggle from "@/components/theme-toggle";
+import { UploadProvider } from "@/contexts/upload-context";
 
 const inconsolata = Inconsolata({
   subsets: ["latin"],
@@ -23,7 +24,9 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning className={inconsolata.variable}>
       <body className={`${inconsolata.className} antialiased`} suppressHydrationWarning>
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem storageKey="supoclip-theme">
-          {children}
+          <UploadProvider>
+            {children}
+          </UploadProvider>
           <ThemeToggle />
         </ThemeProvider>
       </body>

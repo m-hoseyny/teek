@@ -124,6 +124,10 @@ export default function ProcessingPage() {
         }
       });
 
+      eventSource.addEventListener("heartbeat", () => {
+        // keepalive — no state update needed
+      });
+
       eventSource.addEventListener("close", (event: any) => {
         console.log("SSE close event:", event);
         eventSource.close();

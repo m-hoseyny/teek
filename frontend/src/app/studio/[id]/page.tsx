@@ -43,7 +43,7 @@ function ScoreBadge({ score }: { score: number }) {
   const pct = Math.round(score * 100);
   const color =
     pct >= 80 ? "from-emerald-500 to-green-400"
-    : pct >= 60 ? "from-violet-500 to-purple-400"
+    : pct >= 60 ? "from-blue-500 to-blue-400"
     : pct >= 40 ? "from-amber-500 to-yellow-400"
     : "from-gray-500 to-gray-400";
   return (

@@ -32,7 +32,7 @@ const RECENT_ANALYSES = [
 ];
 
 const STATS = [
-  { label: "Total Analyses", value: "47", icon: Video, color: "text-purple-400", bgColor: "bg-purple-400/20" },
+  { label: "Total Analyses", value: "47", icon: Video, color: "text-blue-400", bgColor: "bg-blue-400/20" },
   { label: "Viral Clips", value: "234", icon: Zap, color: "text-yellow-400", bgColor: "bg-yellow-400/20" },
   { label: "Avg Virality", value: "87%", icon: TrendingUp, color: "text-green-400", bgColor: "bg-green-400/20" },
   { label: "Time Saved", value: "42h", icon: Clock, color: "text-blue-400", bgColor: "bg-blue-400/20" },
@@ -109,7 +109,7 @@ export default function DashboardPage() {
                 <div className="p-4 rounded-lg hover:bg-card transition-colors border border-border hover:border-primary cursor-pointer group">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4 flex-1">
-                      <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-purple-900/50 to-blue-900/50 flex items-center justify-center">
+                      <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-blue-900/50 to-blue-900/50 flex items-center justify-center">
                         <Video className="w-6 h-6 text-primary" />
                       </div>
                       <div className="flex-1">

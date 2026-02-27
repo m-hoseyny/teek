@@ -30,7 +30,7 @@ interface HeaderProps {
 function getPlanBadgeColor(plan: string): string {
   switch (plan) {
     case "business":
-      return "bg-purple-100 text-purple-700 border-purple-200";
+      return "bg-blue-100 text-blue-700 border-blue-200";
     case "pro":
       return "bg-blue-100 text-blue-700 border-blue-200";
     case "starter":

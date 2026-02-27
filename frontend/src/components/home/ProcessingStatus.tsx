@@ -37,9 +37,9 @@ export function ProcessingStatus({
       source_analysis: <Loader2 className="w-4 h-4 animate-spin text-blue-500" />,
       database_save: <Loader2 className="w-4 h-4 animate-spin text-blue-500" />,
       download: <Loader2 className="w-4 h-4 animate-spin text-green-500" />,
-      transcript: <Loader2 className="w-4 h-4 animate-spin text-purple-500" />,
+      transcript: <Loader2 className="w-4 h-4 animate-spin text-blue-500" />,
       ai_analysis: <Loader2 className="w-4 h-4 animate-spin text-orange-500" />,
-      clip_generation: <Loader2 className="w-4 h-4 animate-spin text-indigo-500" />,
+      clip_generation: <Loader2 className="w-4 h-4 animate-spin text-blue-500" />,
       save_clips: <Loader2 className="w-4 h-4 animate-spin text-pink-500" />,
       complete: <CheckCircle className="w-4 h-4 text-green-500" />,
     };
@@ -109,7 +109,7 @@ export function ProcessingStatus({
             </div>
             <div
               className={`flex items-center gap-2 p-2 rounded ${
-                currentStep === "transcript" ? "bg-purple-100" : progress > 45 ? "bg-green-100" : "bg-gray-100"
+                currentStep === "transcript" ? "bg-blue-100" : progress > 45 ? "bg-green-100" : "bg-gray-100"
               }`}
             >
               <CheckCircle className={`w-3 h-3 ${progress > 45 ? "text-green-500" : "text-gray-400"}`} />

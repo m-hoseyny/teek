@@ -6,12 +6,14 @@ import { Link as LinkIcon, Upload, FileText, Clipboard, Zap, Video as VideoIcon,
 import { Button } from "@/components/ui/button";
 import { useSession } from "@/lib/auth-client";
 import { useRouter } from "next/navigation";
+import { useUploadContext } from "@/contexts/upload-context";
 
 interface Prompt { id: string; name: string; description: string; }
 
 export default function AnalysisPage() {
   const { data: session } = useSession();
   const router = useRouter();
+  const { setPendingUpload } = useUploadContext();
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
   const [videoUrl, setVideoUrl] = useState("");
@@ -84,26 +86,31 @@ export default function AnalysisPage() {
     setError(null);
 
     try {
-      // Upload the file first if one was selected
-      let resolvedVideoUrl = videoUrl;
+      // If a local file is selected, hand off to the upload-progress page
       if (!videoUrl && fileInputRef.current?.files?.[0]) {
-        const formData = new FormData();
-        formData.append("video", fileInputRef.current.files[0]);
-        const uploadRes = await fetch(`${apiUrl}/upload`, {
-          method: "POST",
-          body: formData,
-        });
-        if (!uploadRes.ok) {
-          const uploadErr = await uploadRes.json().catch(() => ({}));
-          throw new Error(uploadErr.detail || "Failed to upload video");
+        let srtContent: string | undefined;
+        if (transcriptionMethod === "upload" && srtFile) {
+          srtContent = await srtFile.text();
+        } else if (transcriptionMethod === "paste" && pastedTranscript) {
+          srtContent = pastedTranscript;
         }
-        const uploadData = await uploadRes.json();
-        resolvedVideoUrl = uploadData.video_path;
+
+        setPendingUpload({
+          file: fileInputRef.current.files[0],
+          config: {
+            clipsCount,
+            promptId,
+            userId: session.user.id,
+            srtContent,
+          },
+        });
+        router.push("/processing/uploading");
+        return;
       }
 
-      // Prepare request body for POST /tasks/
-      const requestBody: any = {
-        source: { url: resolvedVideoUrl || fileName },
+      // URL-based flow — create task directly
+      const requestBody: Record<string, unknown> = {
+        source: { url: videoUrl || fileName },
         caption_options: {
           pycaps_template: "word-focus",
           transitions_enabled: false,
@@ -117,22 +124,18 @@ export default function AnalysisPage() {
         },
       };
 
-      // Add SRT content if uploaded
       if (transcriptionMethod === "upload" && srtFile) {
-        // Read SRT file content
         const srtContent = await srtFile.text();
-        requestBody.transcription_options.srt_content = srtContent;
+        (requestBody.transcription_options as Record<string, unknown>).srt_content = srtContent;
       } else if (transcriptionMethod === "paste" && pastedTranscript) {
-        // TODO: Format pasted transcript as SRT
-        requestBody.transcription_options.srt_content = pastedTranscript;
+        (requestBody.transcription_options as Record<string, unknown>).srt_content = pastedTranscript;
       }
 
-      // Call POST /tasks/ endpoint
       const response = await fetch(`${apiUrl}/tasks/`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "user_id": session.user.id,
+          user_id: session.user.id,
         },
         body: JSON.stringify(requestBody),
       });
@@ -143,13 +146,10 @@ export default function AnalysisPage() {
       }
 
       const data = await response.json();
-      const taskId = data.task_id;
-
-      // Navigate to processing page
-      router.push(`/processing/${taskId}`);
-    } catch (err: any) {
+      router.push(`/processing/${data.task_id}`);
+    } catch (err: unknown) {
       console.error("Error starting analysis:", err);
-      setError(err.message || "Failed to start analysis. Please try again.");
+      setError(err instanceof Error ? err.message : "Failed to start analysis. Please try again.");
       setIsSubmitting(false);
     }
   };
@@ -190,9 +190,6 @@ export default function AnalysisPage() {
                   placeholder="YouTube, TikTok, or Reels link..."
                   className="w-full h-12 pl-11 pr-4 bg-input border border-border rounded-lg text-white placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                 />
-                <button className="absolute right-2 top-1/2 -translate-y-1/2 px-4 py-1.5 rounded-md bg-primary hover:bg-primary/90 text-white text-sm font-medium transition-colors">
-                  Fetch
-                </button>
               </div>
               <p className="text-xs text-muted-foreground mt-2">Supports high-quality 4K source metadata</p>
             </div>
@@ -208,7 +205,7 @@ export default function AnalysisPage() {
               className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-all ${
                 isDragOver
                   ? "border-primary bg-primary/10"
-                  : "border-purple-500/30 hover:border-primary/50"
+                  : "border-blue-500/30 hover:border-primary/50"
               }`}
             >
               <div className="flex flex-col items-center gap-4">

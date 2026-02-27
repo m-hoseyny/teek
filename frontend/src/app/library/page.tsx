@@ -378,7 +378,7 @@ export default function LibraryPage() {
                             {clip.thumbnail ? (
                               <img src={clip.thumbnail} alt={clip.title} className="w-full h-full object-cover" />
                             ) : (
-                              <div className="absolute inset-0 bg-gradient-to-br from-purple-900/50 to-blue-900/50"></div>
+                              <div className="absolute inset-0 bg-gradient-to-br from-blue-900/50 to-blue-900/50"></div>
                             )}
 
                             {/* Play button overlay */}

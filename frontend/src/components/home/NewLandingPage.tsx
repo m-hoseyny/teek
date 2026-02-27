@@ -17,8 +17,8 @@ export function NewLandingPage() {
                 <Zap className="w-6 h-6 text-white" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-white">ViralFinder AI</h1>
-                <p className="text-xs text-purple-400">VIDEO OPTIMIZER</p>
+                <h1 className="text-xl font-bold text-white">Teek Studio</h1>
+                <p className="text-xs text-blue-400">VIDEO OPTIMIZER</p>
               </div>
             </Link>
             <div className="flex items-center gap-4">
@@ -39,7 +39,7 @@ export function NewLandingPage() {
         {/* Hero Content */}
         <div className="relative z-10 max-w-7xl mx-auto px-6 pt-20 pb-32">
           <div className="text-center max-w-4xl mx-auto">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full glass border border-purple-500/30 mb-8">
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full glass border border-blue-500/30 mb-8">
               <Sparkles className="w-4 h-4 text-primary" />
               <span className="text-sm text-gray-300">AI-Powered Viral Video Analysis</span>
             </div>
@@ -234,7 +234,7 @@ export function NewLandingPage() {
 
       {/* CTA */}
       <div className="max-w-4xl mx-auto px-6 py-20 text-center">
-        <div className="glass rounded-3xl p-12 border border-purple-500/30 glow-purple">
+        <div className="glass rounded-3xl p-12 border border-blue-500/30 glow-purple">
           <h2 className="text-4xl font-bold text-white mb-4">Ready to Go Viral?</h2>
           <p className="text-xl text-gray-400 mb-8">
             Join thousands of creators using AI to create engaging content
@@ -251,7 +251,7 @@ export function NewLandingPage() {
       {/* Footer */}
       <footer className="border-t border-sidebar-border py-8">
         <div className="max-w-7xl mx-auto px-6 text-center text-sm text-muted-foreground">
-          <p>© 2024 ViralFinder AI. All rights reserved.</p>
+          <p>© 2026 Teek Studio. All rights reserved.</p>
         </div>
       </footer>
     </div>

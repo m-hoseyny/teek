@@ -1321,7 +1321,7 @@ export default function TaskPage() {
                               <Button
                                 size="sm"
                                 variant="outline"
-                                className="border-purple-300 text-purple-700 hover:bg-purple-50"
+                                className="border-blue-300 text-blue-700 hover:bg-blue-50"
                                 onClick={() => handlePreviewSubtitles(clip)}
                               >
                                 <Eye className="w-4 h-4 mr-2" />
@@ -1589,7 +1589,7 @@ export default function TaskPage() {
                             <Button
                               size="sm"
                               variant="outline"
-                              className="border-purple-300 text-purple-700 hover:bg-purple-50"
+                              className="border-blue-300 text-blue-700 hover:bg-blue-50"
                               onClick={() => handlePreviewSubtitles(clip)}
                             >
                               <Eye className="w-4 h-4 mr-2" />
