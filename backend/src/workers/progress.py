@@ -74,20 +74,44 @@ class ProgressTracker:
     async def subscribe_to_progress(redis: Redis, task_id: str):
         """
         Subscribe to progress updates for a task.
-        Returns an async generator that yields progress updates.
+
+        Subscribes to pub/sub FIRST, then checks the cached Redis key to
+        catch any updates published before the subscription was established
+        (race condition fix). Yields None periodically as a heartbeat so
+        the SSE handler can poll the DB when no messages arrive.
         """
+        FINAL_STATUSES = {"completed", "error", "awaiting_review"}
+        HEARTBEAT_TIMEOUT = 15.0  # seconds
+
         pubsub = redis.pubsub()
+        # Subscribe before checking cached state to avoid missing messages
         await pubsub.subscribe(f"progress:{task_id}")
 
         try:
-            async for message in pubsub.listen():
-                if message["type"] == "message":
+            # Catch up: check cached state so we don't miss updates published
+            # before the client connected to SSE.
+            cached_raw = await redis.get(f"progress:{task_id}")
+            if cached_raw:
+                cached_data = json.loads(cached_raw)
+                yield cached_data
+                if cached_data.get("status") in FINAL_STATUSES:
+                    return
+
+            # Listen for new messages; yield None on timeout as a heartbeat
+            while True:
+                message = await pubsub.get_message(
+                    ignore_subscribe_messages=True, timeout=HEARTBEAT_TIMEOUT
+                )
+                if message is not None and message["type"] == "message":
                     data = json.loads(message["data"])
                     yield data
+                    if data.get("status") in FINAL_STATUSES:
+                        return
+                else:
+                    yield None  # heartbeat — lets the SSE handler poll the DB
         finally:
             try:
                 await pubsub.unsubscribe(f"progress:{task_id}")
                 await pubsub.close()
             except (ConnectionError, ConnectionResetError, RedisConnectionError):
-                # Connection already lost, ignore cleanup errors
                 pass
