@@ -50,73 +50,72 @@
   --radius: 0.75rem;
   font-size: 16px;
 
-  /* ViralFinder AI Dark Theme */
-  --background: #0F0716;
+  /* Dark Blue Theme */
+  --background: #020617;
   --foreground: #FFFFFF;
-  --card: #1A1124;
+  --card: #0f172a;
   --card-foreground: #FFFFFF;
-  --popover: #1A1124;
+  --popover: #0f172a;
   --popover-foreground: #FFFFFF;
-  --primary: #A855F7;
+  --primary: #256af4;
   --primary-foreground: #FFFFFF;
-  --secondary: #6366F1;
+  --secondary: #3b82f6;
   --secondary-foreground: #FFFFFF;
-  --muted: #2A1F35;
-  --muted-foreground: #9CA3AF;
-  --accent: #A855F7;
+  --muted: #1e293b;
+  --muted-foreground: #94a3b8;
+  --accent: #256af4;
   --accent-foreground: #FFFFFF;
   --destructive: #EF4444;
-  --border: rgba(168, 85, 247, 0.2);
-  --input: rgba(255, 255, 255, 0.1);
-  --ring: #A855F7;
-  --chart-1: #A855F7;
-  --chart-2: #6366F1;
-  --chart-3: #8B5CF6;
-  --chart-4: #C084FC;
-  --chart-5: #E9D5FF;
-  --sidebar: #0F0716;
+  --border: rgba(37, 106, 244, 0.15);
+  --input: rgba(255, 255, 255, 0.08);
+  --ring: #256af4;
+  --chart-1: #256af4;
+  --chart-2: #3b82f6;
+  --chart-3: #60a5fa;
+  --chart-4: #93c5fd;
+  --chart-5: #bfdbfe;
+  --sidebar: #020617;
   --sidebar-foreground: #FFFFFF;
-  --sidebar-primary: #A855F7;
+  --sidebar-primary: #256af4;
   --sidebar-primary-foreground: #FFFFFF;
-  --sidebar-accent: #1A1124;
+  --sidebar-accent: #0f172a;
   --sidebar-accent-foreground: #FFFFFF;
-  --sidebar-border: rgba(168, 85, 247, 0.2);
-  --sidebar-ring: #A855F7;
+  --sidebar-border: rgba(37, 106, 244, 0.15);
+  --sidebar-ring: #256af4;
 }
 
 .dark {
-  /* Dark mode uses same theme as default */
-  --background: #0F0716;
+  --background: #020617;
   --foreground: #FFFFFF;
-  --card: #1A1124;
+  --card: #0f172a;
   --card-foreground: #FFFFFF;
-  --popover: #1A1124;
+  --popover: #0f172a;
   --popover-foreground: #FFFFFF;
-  --primary: #A855F7;
+  --primary: #256af4;
   --primary-foreground: #FFFFFF;
-  --secondary: #6366F1;
+  --secondary: #3b82f6;
   --secondary-foreground: #FFFFFF;
-  --muted: #2A1F35;
-  --muted-foreground: #9CA3AF;
-  --accent: #A855F7;
+  --muted: #1e293b;
+  --muted-foreground: #94a3b8;
+  --accent: #256af4;
   --accent-foreground: #FFFFFF;
   --destructive: #EF4444;
-  --border: rgba(168, 85, 247, 0.2);
-  --input: rgba(255, 255, 255, 0.1);
-  --ring: #A855F7;
-  --chart-1: #A855F7;
-  --chart-2: #6366F1;
-  --chart-3: #8B5CF6;
-  --chart-4: #C084FC;
-  --chart-5: #E9D5FF;
-  --sidebar: #0F0716;
+  --border: rgba(37, 106, 244, 0.15);
+  --input: rgba(255, 255, 255, 0.08);
+  --ring: #256af4;
+  --chart-1: #256af4;
+  --chart-2: #3b82f6;
+  --chart-3: #60a5fa;
+  --chart-4: #93c5fd;
+  --chart-5: #bfdbfe;
+  --sidebar: #020617;
   --sidebar-foreground: #FFFFFF;
-  --sidebar-primary: #A855F7;
+  --sidebar-primary: #256af4;
   --sidebar-primary-foreground: #FFFFFF;
-  --sidebar-accent: #1A1124;
+  --sidebar-accent: #0f172a;
   --sidebar-accent-foreground: #FFFFFF;
-  --sidebar-border: rgba(168, 85, 247, 0.2);
-  --sidebar-ring: #A855F7;
+  --sidebar-border: rgba(37, 106, 244, 0.15);
+  --sidebar-ring: #256af4;
 }
 
 @layer base {
@@ -134,19 +133,19 @@
 }
 
 .dark .bg-white {
-  background-color: #262626 !important;
+  background-color: #0f172a !important;
 }
 
 .dark .bg-gray-50 {
-  background-color: #262626 !important;
+  background-color: #0f172a !important;
 }
 
 .dark .bg-gray-100 {
-  background-color: #262626 !important;
+  background-color: #0f172a !important;
 }
 
 .dark .bg-gray-200 {
-  background-color: #3a3a3a !important;
+  background-color: #1e293b !important;
 }
 
 .dark .text-black {
@@ -154,45 +153,45 @@
 }
 
 .dark .text-gray-600 {
-  color: #ACBFA4 !important;
+  color: #94a3b8 !important;
 }
 
 .dark .text-gray-500 {
-  color: #ACBFA4 !important;
+  color: #94a3b8 !important;
 }
 
 .dark .border-gray-200 {
-  border-color: #3a3a3a !important;
+  border-color: #1e293b !important;
 }
 
 .dark .border-gray-300 {
-  border-color: #4a4a4a !important;
+  border-color: #334155 !important;
 }
 
 /* Glassmorphism effect */
 .glass {
-  background: rgba(26, 17, 36, 0.6);
+  background: rgba(15, 23, 42, 0.6);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(168, 85, 247, 0.2);
+  border: 1px solid rgba(37, 106, 244, 0.15);
 }
 
-/* Purple gradient glow */
+/* Blue glow */
 .glow-purple {
-  box-shadow: 0 0 20px rgba(168, 85, 247, 0.4), 0 0 40px rgba(168, 85, 247, 0.2);
+  box-shadow: 0 0 20px rgba(37, 106, 244, 0.35), 0 0 40px rgba(37, 106, 244, 0.15);
 }
 
 .glow-purple-strong {
-  box-shadow: 0 0 30px rgba(168, 85, 247, 0.6), 0 0 60px rgba(168, 85, 247, 0.3);
+  box-shadow: 0 0 30px rgba(37, 106, 244, 0.55), 0 0 60px rgba(37, 106, 244, 0.25);
 }
 
-/* Gradient backgrounds */
+/* Blue gradient backgrounds */
 .gradient-purple {
-  background: linear-gradient(135deg, #A855F7 0%, #6366F1 100%);
+  background: linear-gradient(135deg, #256af4 0%, #3b82f6 100%);
 }
 
 .gradient-purple-hover {
-  background: linear-gradient(135deg, #9333EA 0%, #4F46E5 100%);
+  background: linear-gradient(135deg, #1d5bd4 0%, #2563eb 100%);
 }
 
 /* Virality heatmap colors */
@@ -243,17 +242,17 @@
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #A855F7;
+  background: #256af4;
   cursor: pointer;
-  box-shadow: 0 0 8px rgba(168, 85, 247, 0.6);
+  box-shadow: 0 0 8px rgba(37, 106, 244, 0.6);
 }
 
 .slider-thumb-purple::-moz-range-thumb {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #A855F7;
+  background: #256af4;
   cursor: pointer;
   border: none;
-  box-shadow: 0 0 8px rgba(168, 85, 247, 0.6);
+  box-shadow: 0 0 8px rgba(37, 106, 244, 0.6);
 }
