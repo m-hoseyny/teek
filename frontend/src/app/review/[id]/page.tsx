@@ -45,24 +45,16 @@ interface TaskData {
   };
 }
 
-// Map review-page style IDs to pycaps template names
-const STYLE_TO_TEMPLATE: Record<string, string> = {
-  "word-focus": "word-focus",
-  "explosive": "explosive",
-  "minimalist": "minimalist",
-  "vibrant": "vibrant",
-};
-
-const CAPTION_STYLES = [
-  { id: "word-focus",  name: "WORD FOCUS",  subtitle: "Yellow highlight" },
-  { id: "explosive",   name: "EXPLOSIVE",   subtitle: "Energetic" },
-  { id: "minimalist",  name: "MINIMALIST",  subtitle: "Clean & modern" },
-  { id: "vibrant",     name: "VIBRANT",     subtitle: "Colorful" },
-];
+interface PycapsTemplate {
+  name: string;
+  display_name: string;
+  description: string;
+  is_default: boolean;
+}
 
 const CLIP_COLORS = [
-  "#A855F7", "#3B82F6", "#10B981", "#F59E0B",
-  "#EF4444", "#EC4899", "#14B8A6", "#8B5CF6",
+  "#256af4", "#3B82F6", "#10B981", "#F59E0B",
+  "#EF4444", "#EC4899", "#14B8A6", "#256af4",
 ];
 
 // Matches Arabic, Hebrew, and other RTL scripts
@@ -98,6 +90,8 @@ export default function ReviewPage() {
   const [segments, setSegments] = useState<TranscriptSegment[]>([]);
   const [words, setWords] = useState<Word[]>([]);
   const [clips, setClips] = useState<Clip[]>([]);
+  const [templates, setTemplates] = useState<PycapsTemplate[]>([]);
+  const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
   const [activeTab, setActiveTab] = useState<"insights" | "transcript">("transcript");
   const [selectedStyle, setSelectedStyle] = useState("word-focus");
   const [showSubtitles, setShowSubtitles] = useState(true);
@@ -177,6 +171,29 @@ export default function ReviewPage() {
     fetchClips();
     fetchSubtitleDefaults();
   }, [taskId, session?.user?.id, apiUrl]);
+
+  // Fetch available pycaps templates from the backend
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setIsLoadingTemplates(true);
+        const res = await fetch(`${apiUrl}/pycaps-templates`);
+        if (res.ok) {
+          const data = await res.json();
+          const list: PycapsTemplate[] = data.templates || [];
+          setTemplates(list);
+          // Set the default template as selected if we haven't picked one yet
+          const def = list.find((t) => t.is_default);
+          if (def) setSelectedStyle(def.name);
+        }
+      } catch {
+        // keep default
+      } finally {
+        setIsLoadingTemplates(false);
+      }
+    };
+    load();
+  }, [apiUrl]);
 
   // Smooth currentTime updates via requestAnimationFrame
   useEffect(() => {
@@ -290,7 +307,12 @@ export default function ReviewPage() {
       const response = await fetch(`${apiUrl}/tasks/${taskId}/generate-clips`, {
         method: "POST",
         headers: { "Content-Type": "application/json", user_id: session.user.id },
-        body: JSON.stringify({ transitions_enabled: transitionsEnabled, aspect_ratio: aspectRatio, subtitle_style: subtitleStyle }),
+        body: JSON.stringify({
+          transitions_enabled: transitionsEnabled,
+          aspect_ratio: aspectRatio,
+          subtitle_style: subtitleStyle,
+          pycaps_template: selectedStyle,
+        }),
       });
       if (response.ok) router.push(`/studio/${taskId}`);
     } catch (error) {
@@ -362,7 +384,7 @@ export default function ReviewPage() {
                     words={words}
                     currentTime={currentTime}
                     clipStartSeconds={0}
-                    template={STYLE_TO_TEMPLATE[selectedStyle] ?? "word-focus"}
+                    template={selectedStyle}
                     subtitleStyle={subtitleStyle}
                   />
                 )}
@@ -440,7 +462,7 @@ export default function ReviewPage() {
                     onChange={handleSeek}
                     className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
                     style={{
-                      background: `linear-gradient(to right, #A855F7 0%, #A855F7 ${(currentTime / (duration || 1)) * 100}%, #374151 ${(currentTime / (duration || 1)) * 100}%, #374151 100%)`,
+                      background: `linear-gradient(to right, #256af4 0%, #256af4 ${(currentTime / (duration || 1)) * 100}%, #374151 ${(currentTime / (duration || 1)) * 100}%, #374151 100%)`,
                     }}
                   />
                 </div>
@@ -690,25 +712,43 @@ export default function ReviewPage() {
               </div>
             )}
 
-            {/* Caption Styles */}
+            {/* Caption Styles — loaded dynamically from backend */}
             <div className="glass rounded-2xl p-6">
               <h3 className="font-semibold text-white uppercase tracking-wide mb-4">Caption Style</h3>
-              <div className="grid grid-cols-2 gap-3">
-                {CAPTION_STYLES.map((style) => (
-                  <button
-                    key={style.id}
-                    onClick={() => setSelectedStyle(style.id)}
-                    className={`p-4 rounded-xl border-2 transition-all text-center ${
-                      selectedStyle === style.id
-                        ? "border-primary bg-primary/10 glow-purple"
-                        : "border-border hover:border-primary/50"
-                    }`}
-                  >
-                    <div className="text-xs font-bold mb-1 text-white">{style.name}</div>
-                    <div className="text-xs text-gray-400">{style.subtitle}</div>
-                  </button>
-                ))}
-              </div>
+
+              {isLoadingTemplates ? (
+                <div className="space-y-2">
+                  {[1, 2, 3, 4].map((i) => (
+                    <div key={i} className="h-14 bg-muted/40 rounded-xl animate-pulse" />
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                  {templates.map((tpl) => (
+                    <button
+                      key={tpl.name}
+                      onClick={() => setSelectedStyle(tpl.name)}
+                      className={`w-full text-left px-4 py-3 rounded-xl border-2 transition-all ${
+                        selectedStyle === tpl.name
+                          ? "border-primary bg-primary/10 glow-purple"
+                          : "border-border hover:border-primary/50"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-white uppercase tracking-wide">
+                          {tpl.display_name}
+                        </span>
+                        {tpl.is_default && (
+                          <span className="text-[10px] font-semibold text-primary/70 border border-primary/30 px-1.5 py-0.5 rounded">
+                            Default
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-400 mt-0.5 truncate">{tpl.description}</p>
+                    </button>
+                  ))}
+                </div>
+              )}
 
               {/* Font Size Slider */}
               <div className="mt-5 pt-4 border-t border-border/40">
@@ -727,7 +767,7 @@ export default function ReviewPage() {
                   onChange={(e) => setSubtitleStyle({ font_size: parseInt(e.target.value) })}
                   className="w-full h-2 rounded-lg appearance-none cursor-pointer"
                   style={{
-                    background: `linear-gradient(to right, #A855F7 0%, #A855F7 ${((subtitleStyle.font_size - 16) / 40) * 100}%, #374151 ${((subtitleStyle.font_size - 16) / 40) * 100}%, #374151 100%)`,
+                    background: `linear-gradient(to right, #256af4 0%, #256af4 ${((subtitleStyle.font_size - 16) / 40) * 100}%, #374151 ${((subtitleStyle.font_size - 16) / 40) * 100}%, #374151 100%)`,
                   }}
                 />
                 <div className="flex justify-between text-[10px] text-gray-600 mt-1">

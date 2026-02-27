@@ -37,7 +37,7 @@ export interface UserPreferences extends FontStyleOptions {
 export const DEFAULT_USER_PREFERENCES: UserPreferences = {
   ...DEFAULT_FONT_STYLE_OPTIONS,
   transitionsEnabled: false,
-  transcriptionProvider: "local",
+  transcriptionProvider: "assemblyai",
   whisperChunkingEnabled: true,
   whisperChunkDurationSeconds: 1200,
   whisperChunkOverlapSeconds: 8,

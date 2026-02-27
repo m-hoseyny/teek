@@ -100,7 +100,7 @@ export function SettingsSectionTranscription({
       <div className="space-y-3">
         <div>
           <p className="text-sm font-medium text-black">Provider</p>
-          <p className="text-xs text-gray-500">Choose local Whisper or AssemblyAI for transcript generation.</p>
+          <p className="text-xs text-gray-500">Choose AssemblyAI (default) or local Whisper for transcript generation.</p>
         </div>
 
         <Select
@@ -112,16 +112,16 @@ export function SettingsSectionTranscription({
             <SelectValue placeholder="Select provider" />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value="assemblyai">
+              <div className="flex items-center gap-2">
+                <Cloud className="w-4 h-4" />
+                AssemblyAI (Default)
+              </div>
+            </SelectItem>
             <SelectItem value="local">
               <div className="flex items-center gap-2">
                 <Cpu className="w-4 h-4" />
                 Local Whisper
-              </div>
-            </SelectItem>
-            <SelectItem value="assemblyai">
-              <div className="flex items-center gap-2">
-                <Cloud className="w-4 h-4" />
-                AssemblyAI
               </div>
             </SelectItem>
           </SelectContent>
