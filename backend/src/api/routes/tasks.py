@@ -190,15 +190,16 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
             url=raw_source["url"],
             title=raw_source.get("title"),
             pycaps_template=pycaps_template,
+            transitions_enabled=transitions_enabled,
             transcription_provider=transcription_provider,
             ai_provider=ai_options.provider,
+            ai_model=ai_options.model,
+            ai_routing_mode=resolved_zai_routing_mode,
             transcript_review_enabled=transcript_review_enabled,
+            transcription_options=transcription_runtime_options,
             prompt_id=ai_options.prompt_id,
             clips_count=ai_options.clips_count,
         )
-
-        # Get source type for worker
-        source_type = task_service.video_service.determine_source_type(raw_source["url"])
 
         queue_name = (
             config.arq_assembly_queue_name
@@ -206,39 +207,18 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
             else config.arq_local_queue_name
         )
 
-        # Enqueue job for worker
+        # Enqueue job for worker — only task_id needed; all config is in DB
         try:
-            # Build common args shared by both worker entry points
-            common_args = [
-                task_id,
-                raw_source["url"],
-                source_type,
-                user_id,
-                pycaps_template,
-                transitions_enabled,
-                transcription_provider,
-                ai_options.provider,
-                ai_options.model,
-                resolved_zai_routing_mode,
-                transcription_runtime_options,
-            ]
-
             if transcript_review_enabled:
-                # transcribe_video_task has extra transcript_review_enabled param
                 job_id = await JobQueue.enqueue_job(
                     "transcribe_video_task",
-                    *common_args,
-                    True,  # transcript_review_enabled
-                    ai_options.prompt_id,
-                    ai_options.clips_count,
+                    task_id,
                     queue_name=queue_name,
                 )
             else:
                 job_id = await JobQueue.enqueue_job(
                     "process_video_task",
-                    *common_args,
-                    ai_options.prompt_id,
-                    ai_options.clips_count,
+                    task_id,
                     queue_name=queue_name,
                 )
         except Exception as enqueue_error:
@@ -494,28 +474,7 @@ async def retry_task(task_id: str, request: Request, db: AsyncSession = Depends(
         if task.get("status") != "error":
             raise HTTPException(status_code=400, detail="Task can only be retried from error status")
 
-        # Get source URL for retry
-        source_type = task.get("source_type")
-        if not source_type:
-            raise HTTPException(status_code=400, detail="Source type not found for retry")
-
-        # Get video path from metadata or source
-        metadata = task.get("metadata") or {}
-        video_path = metadata.get("video_path")
-        if not video_path:
-            raise HTTPException(status_code=400, detail="Video path not found for retry - cannot retry this task")
-
-        # Extract task parameters from stored fields and metadata
-        task_metadata = task.get("metadata") or {}
-        pycaps_template = task_metadata.get("pycaps_template", "word-focus")
-        transitions_enabled = task_metadata.get("transitions_enabled", False)
         transcription_provider = task.get("transcription_provider", "assemblyai")
-        ai_provider = task.get("ai_provider", "openai")
-        ai_model = task_metadata.get("ai_model")
-        ai_routing_mode = task_metadata.get("ai_routing_mode")
-        prompt_id = task_metadata.get("prompt_id")
-        clips_count = task_metadata.get("clips_count")
-        transcription_options = task_metadata.get("transcription_options")
 
         # Delete existing clips from previous attempt
         await task_service.clip_repo.delete_clips_by_task(db, task_id)
@@ -525,44 +484,24 @@ async def retry_task(task_id: str, request: Request, db: AsyncSession = Depends(
             db, task_id, "queued", progress=0, progress_message="Task queued for retry"
         )
 
-        # Build common args for worker
-        common_args = [
-            task_id,
-            video_path,
-            source_type,
-            user_id,
-            pycaps_template,
-            transitions_enabled,
-            transcription_provider,
-            ai_provider,
-            ai_model,
-            ai_routing_mode,
-            transcription_options,
-        ]
-
         queue_name = (
             config.arq_assembly_queue_name
             if transcription_provider == "assemblyai"
             else config.arq_local_queue_name
         )
 
-        # Enqueue job for worker
+        # Enqueue job — only task_id needed; all config is fetched from DB by worker
         transcript_review_enabled = task.get("transcript_review_enabled", False)
         if transcript_review_enabled:
             job_id = await JobQueue.enqueue_job(
                 "transcribe_video_task",
-                *common_args,
-                True,  # transcript_review_enabled
-                prompt_id,
-                clips_count,
+                task_id,
                 queue_name=queue_name,
             )
         else:
             job_id = await JobQueue.enqueue_job(
                 "process_video_task",
-                *common_args,
-                prompt_id,
-                clips_count,
+                task_id,
                 queue_name=queue_name,
             )
 

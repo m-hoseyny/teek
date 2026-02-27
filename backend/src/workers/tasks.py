@@ -52,35 +52,13 @@ def _resolve_task_timeout_seconds(
 async def transcribe_video_task(
     ctx: Dict[str, Any],
     task_id: str,
-    url: str,
-    source_type: str,
-    user_id: str,
-    pycaps_template: str = "word-focus",
-    transitions_enabled: bool = False,
-    transcription_provider: str = "local",
-    ai_provider: str = "openai",
-    ai_model: Optional[str] = None,
-    ai_routing_mode: Optional[str] = None,
-    transcription_options: Optional[Dict[str, Any]] = None,
-    transcript_review_enabled: bool = False,
-    prompt_id: Optional[str] = None,
-    clips_count: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Background worker task to download video and transcribe it.
     If transcript_review_enabled is True, stops after transcription for user review.
     Otherwise, continues to full processing (AI analysis + clip generation).
 
-    Args:
-        ctx: arq context
-        task_id: Task ID to update
-        url: Video URL or file path
-        source_type: "youtube", "video_url", or "uploaded_file"
-        user_id: User ID who created the task
-        transcript_review_enabled: If True, pause after transcription for user review
-        prompt_id: Prompt template ID for AI clip selection
-        clips_count: Number of clips to generate
-        Other args: Same as process_video_task
+    All task configuration is fetched from the database using task_id.
 
     Returns:
         Dict with results - either completed task or awaiting_review status
@@ -93,7 +71,7 @@ async def transcribe_video_task(
     from ..workers.job_queue import JobQueue
     from ..workers.progress import ProgressTracker
 
-    logger.info(f"Worker transcribing task {task_id} (review_enabled={transcript_review_enabled})")
+    logger.info(f"Worker transcribing task {task_id}")
 
     progress = ProgressTracker(ctx['redis'], task_id)
 
@@ -114,6 +92,28 @@ async def transcribe_video_task(
                 await ensure_not_cancelled()
 
             config = Config()
+
+            # Fetch all task configuration from DB
+            task = await task_service.task_repo.get_task_by_id(db, task_id)
+            if not task:
+                raise ValueError(f"Task {task_id} not found")
+            task_metadata = task.get("metadata") or {}
+
+            url: str = task_metadata.get("url", "")
+            source_type: str = task_metadata.get("source_type") or task.get("source_type") or "uploaded_file"
+            user_id: str = task.get("user_id", "")
+            pycaps_template: str = task_metadata.get("pycaps_template", "word-focus")
+            transitions_enabled: bool = task_metadata.get("transitions_enabled", False)
+            transcription_provider: str = task.get("transcription_provider", "local")
+            ai_provider: str = task.get("ai_provider", "openai")
+            ai_model: Optional[str] = task_metadata.get("ai_model")
+            ai_routing_mode: Optional[str] = task_metadata.get("ai_routing_mode")
+            transcript_review_enabled: bool = task.get("transcript_review_enabled", False)
+            transcription_options: Dict[str, Any] = task_metadata.get("transcription_options") or {}
+            prompt_id: Optional[str] = task_metadata.get("prompt_id")
+            clips_count: Optional[int] = task_metadata.get("clips_count")
+
+            logger.info(f"Worker transcribing task {task_id} (review_enabled={transcript_review_enabled})")
 
             # Update status to processing
             await task_service.task_repo.update_task_status(
@@ -177,21 +177,36 @@ async def transcribe_video_task(
             if srt_content and srt_content.strip():
                 effective_provider = "srt"
                 logger.info(f"User-provided SRT content detected, skipping AI transcription")
-                await update_progress(30, "Extracting Audio...", metadata={"step": 2, "step_name": "extract_audio"})
-            else:
-                await update_progress(30, "Extracting Audio...", metadata={"step": 2, "step_name": "extract_audio"})
 
-            # Transcribe video or use provided SRT content
+            await update_progress(30, "Extracting Audio...", metadata={"step": 2, "step_name": "extract_audio"})
+
+            # Transcribe video or use provided SRT content.
+            # get_video_transcript is synchronous (Whisper / AssemblyAI HTTP polling),
+            # so run it in a thread to avoid blocking the arq event loop.
             from ..video_utils import get_video_transcript
-            
-            transcript = get_video_transcript(
+            from ..utils.async_helpers import run_in_thread
+
+            provider_label = {
+                "assemblyai": "AssemblyAI",
+                "local": "Whisper",
+                "srt": "SRT",
+            }.get(effective_provider, effective_provider)
+
+            await update_progress(
+                35,
+                f"Transcribing with {provider_label}...",
+                metadata={"step": 3, "step_name": "transcription", "transcription_provider": effective_provider},
+            )
+
+            transcript = await run_in_thread(
+                get_video_transcript,
                 video_path,
-                transcription_provider=effective_provider,
-                assembly_api_key=assembly_api_key,
-                whisper_chunking_enabled=transcription_options.get("whisper_chunking_enabled") if transcription_options else None,
-                whisper_chunk_duration_seconds=transcription_options.get("whisper_chunk_duration_seconds") if transcription_options else None,
-                whisper_chunk_overlap_seconds=transcription_options.get("whisper_chunk_overlap_seconds") if transcription_options else None,
-                srt_content=srt_content,
+                effective_provider,
+                assembly_api_key,
+                transcription_options.get("whisper_chunking_enabled") if transcription_options else None,
+                transcription_options.get("whisper_chunk_duration_seconds") if transcription_options else None,
+                transcription_options.get("whisper_chunk_overlap_seconds") if transcription_options else None,
+                srt_content,
             )
 
             if not transcript:
@@ -208,7 +223,7 @@ async def transcribe_video_task(
                 except Exception as deduct_error:
                     logger.warning(f"Failed to deduct transcription minutes: {deduct_error}")
 
-            await update_progress(50, "Generating AI Transcript...", metadata={"step": 3, "step_name": "transcription"})
+            await update_progress(50, "Transcript ready, analyzing...", metadata={"step": 3, "step_name": "transcription"})
 
             # If review is enabled, run AI analysis first, create clip records, then pause
             if transcript_review_enabled:
@@ -439,37 +454,11 @@ async def transcribe_video_task(
 async def process_video_task(
     ctx: Dict[str, Any],
     task_id: str,
-    url: str,
-    source_type: str,
-    user_id: str,
-    pycaps_template: str = "word-focus",
-    transitions_enabled: bool = False,
-    transcription_provider: str = "local",
-    ai_provider: str = "openai",
-    ai_model: Optional[str] = None,
-    ai_routing_mode: Optional[str] = None,
-    transcription_options: Optional[Dict[str, Any]] = None,
-    prompt_id: Optional[str] = None,
-    clips_count: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Background worker task to process a video.
 
-    Args:
-        ctx: arq context (provides Redis connection and other utilities)
-        task_id: Task ID to update
-        url: Video URL or file path
-        source_type: "youtube" or "video_url"
-        user_id: User ID who created the task
-        pycaps_template: pycaps template name for animated subtitles
-        transitions_enabled: Whether transition effects should be applied
-        transcription_provider: "local" or "assemblyai"
-        ai_provider: "openai", "google", "anthropic", or "zai"
-        ai_model: Optional model override for the selected AI provider
-        ai_routing_mode: Optional z.ai key routing mode ("auto", "subscription", "metered")
-        transcription_options: Optional local transcription overrides and task timeout
-        prompt_id: Prompt template ID for AI clip selection
-        clips_count: Number of clips to generate
+    All task configuration is fetched from the database using task_id.
 
     Returns:
         Dict with processing results
@@ -501,6 +490,25 @@ async def process_video_task(
                 await progress.update(percent, message, metadata=metadata)
                 logger.info(f"Task {task_id}: {percent}% - {message}")
                 await ensure_not_cancelled()
+
+            # Fetch all task configuration from DB
+            task = await task_service.task_repo.get_task_by_id(db, task_id)
+            if not task:
+                raise ValueError(f"Task {task_id} not found")
+            task_metadata = task.get("metadata") or {}
+
+            url: str = task_metadata.get("url", "")
+            source_type: str = task_metadata.get("source_type") or task.get("source_type") or "uploaded_file"
+            user_id: str = task.get("user_id", "")
+            pycaps_template: str = task_metadata.get("pycaps_template", "word-focus")
+            transitions_enabled: bool = task_metadata.get("transitions_enabled", False)
+            transcription_provider: str = task.get("transcription_provider", "local")
+            ai_provider: str = task.get("ai_provider", "openai")
+            ai_model: Optional[str] = task_metadata.get("ai_model")
+            ai_routing_mode: Optional[str] = task_metadata.get("ai_routing_mode")
+            transcription_options: Dict[str, Any] = task_metadata.get("transcription_options") or {}
+            prompt_id: Optional[str] = task_metadata.get("prompt_id")
+            clips_count: Optional[int] = task_metadata.get("clips_count")
 
             worker_timeout_cap_seconds = int(Config().worker_job_timeout_seconds)
             task_timeout_seconds = _resolve_task_timeout_seconds(
@@ -656,12 +664,16 @@ async def generate_clips_from_transcript(
                 for clip in sorted(clips, key=lambda x: x.get("clip_order", 0))
             ]
 
-            # Create the clips WITHOUT subtitles (subtitles added on-demand during export)
+            # Create clips with subtitle style from task metadata
             task_metadata = task.get("metadata") or {}
             pycaps_template = task_metadata.get("pycaps_template", "word-focus")
             transitions_enabled = task_metadata.get("transitions_enabled", False)
             RATIO_MAP = {"9:16": 9 / 16, "1:1": 1.0, "16:9": 16 / 9}
             target_ratio = RATIO_MAP.get(task_metadata.get("aspect_ratio", "9:16"), 9 / 16)
+            subtitle_style = task_metadata.get("subtitle_style") or {}
+            caption_options: dict = {}
+            if subtitle_style:
+                caption_options["subtitle_style"] = subtitle_style
             clips_result = await VideoService.create_video_clips(
                 video_path=Path(video_path),
                 segments=segments,
@@ -669,6 +681,7 @@ async def generate_clips_from_transcript(
                 transitions_enabled=transitions_enabled,
                 progress_callback=lambda p, m, meta=None: progress.update(p, m, metadata=meta),
                 add_subtitles=False,
+                caption_options=caption_options if caption_options else None,
                 target_ratio=target_ratio,
             )
 
@@ -687,6 +700,7 @@ async def generate_clips_from_transcript(
                         "duration": clip_info["duration"],
                         "words_json": _json.dumps(clip_info.get("words", []), ensure_ascii=False),
                         "pycaps_template": pycaps_template,
+                        "thumbnail_filename": clip_info.get("thumbnail_filename"),
                     }
                 )
 
@@ -728,14 +742,12 @@ async def generate_clips_from_transcript(
 async def retry_clips_analysis(
     ctx: Dict[str, Any],
     task_id: str,
-    user_id: str,
-    transcript: str,
-    prompt_id: Optional[str] = None,
-    clips_count: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Worker task to retry clip generation by re-running AI analysis on existing transcript.
     This is called when user wants new clips from the same transcript.
+
+    All task configuration is fetched from the database using task_id.
     """
     from ..database import AsyncSessionLocal
     from ..config import Config
@@ -765,12 +777,20 @@ async def retry_clips_analysis(
                 logger.info(f"Task {task_id}: {percent}% - {message}")
                 await ensure_not_cancelled()
 
-            # Get task details for AI provider settings
+            # Fetch all task configuration from DB
             task = await task_service.task_repo.get_task_by_id(db, task_id)
             if not task:
                 raise ValueError(f"Task {task_id} not found")
+            task_metadata = task.get("metadata") or {}
 
-            ai_provider = task.get("ai_provider", "openai")
+            user_id: str = task.get("user_id", "")
+            ai_provider: str = task.get("ai_provider", "openai")
+            transcript: str = task.get("editable_transcript") or ""
+            prompt_id: Optional[str] = task_metadata.get("prompt_id")
+            clips_count: Optional[int] = task_metadata.get("clips_count")
+
+            if not transcript:
+                raise ValueError(f"No editable transcript found for task {task_id}")
 
             await update_progress(55, "Identifying Viral Moments...", metadata={"step": 4, "step_name": "virality_analysis"})
 
@@ -836,7 +856,7 @@ async def retry_clips_analysis(
             # Load transcript cache for word-level timing (subtitle preview)
             import json as _json
             from ..video_utils import load_cached_transcript_data, parse_timestamp_to_seconds
-            _retry_video_path = (task.get("metadata") or {}).get("video_path")
+            _retry_video_path = task_metadata.get("video_path")
             _cached_tr_retry = load_cached_transcript_data(Path(_retry_video_path)) if _retry_video_path else None
 
             # Create clip records in DB (without video files yet)

@@ -7,8 +7,12 @@ CSS-styled captions via the pycaps library.
 
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+import json
 import logging
+import os
 import shutil
+import tempfile
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +48,171 @@ TEMPLATE_DESCRIPTIONS: Dict[str, str] = {
 }
 
 DEFAULT_TEMPLATE = "word-focus"
+
+
+def _pycaps_preset_dir() -> Path | None:
+    """Return the path to the pycaps preset templates directory."""
+    try:
+        import importlib.util
+        spec = importlib.util.find_spec("pycaps")
+        if spec and spec.origin:
+            return Path(spec.origin).parent / "template" / "preset"
+    except Exception:
+        pass
+    return None
+
+
+# Templates that have a local override to fix pycaps bugs.
+# "explosive" combines zoom_in_primitive (per word) + slide_in_primitive (per segment)
+# simultaneously, causing both to call set_position() and overwrite each other —
+# words end up at random/incorrect positions during animation frames.
+# See: pycaps/animation/builtin/primitive/zoom_in_primitive.py TODO comment.
+_LOCALLY_OVERRIDDEN_TEMPLATES = {"explosive"}
+
+# Fixed explosive template — removes the conflicting zoom_in_primitive on words,
+# keeps only the segment-level slide_in/slide_out animations.
+_EXPLOSIVE_FIXED_JSON: Dict[str, Any] = {
+    "css": "styles.css",
+    "resources": "resources",
+    "layout": {
+        "max_width_ratio": 0.8,
+        "max_number_of_lines": 2,
+        "min_number_of_lines": 1,
+        "vertical_align": {"align": "center", "offset": -0.1},
+    },
+    "splitters": [{"type": "limit_by_chars", "min_chars": 10, "max_chars": 25}],
+    "animations": [
+        {
+            "type": "slide_in_primitive",
+            "when": "narration-starts",
+            "what": "segment",
+            "duration": 0.4,
+            "direction": "left",
+            "distance": 80,
+            "transformer": "ease_out",
+        },
+        {
+            "type": "slide_out",
+            "when": "narration-ends",
+            "what": "segment",
+            "duration": 0.3,
+            "direction": "right",
+        },
+    ],
+    "sound_effects": [
+        {
+            "type": "preset",
+            "name": "ding",
+            "when": "narration-starts",
+            "what": "word",
+            "volume": 0.2,
+            "tag_condition": "highlighted",
+        }
+    ],
+    "tagger_rules": [
+        {
+            "type": "ai",
+            "prompt": "the most important phrase or word in all the script",
+            "tag": "highlighted",
+        }
+    ],
+}
+
+_local_templates_dir: Optional[Path] = None
+_local_templates_lock = threading.Lock()
+
+
+def _get_local_templates_dir() -> Optional[Path]:
+    """Create and return a directory of fixed local template overrides.
+
+    Copies CSS and resources from the installed pycaps package but uses
+    patched JSON configs to avoid known animation bugs.
+    Returns the parent directory (used as CWD so pycaps finds local templates).
+    """
+    global _local_templates_dir
+    with _local_templates_lock:
+        if _local_templates_dir is not None and _local_templates_dir.is_dir():
+            return _local_templates_dir
+
+        preset_dir = _pycaps_preset_dir()
+        if not preset_dir:
+            return None
+
+        try:
+            tmp = Path(tempfile.gettempdir()) / "pycaps_template_overrides"
+            explosive_dir = tmp / "explosive"
+            explosive_dir.mkdir(parents=True, exist_ok=True)
+
+            # Write fixed template JSON
+            (explosive_dir / "pycaps.template.json").write_text(
+                json.dumps(_EXPLOSIVE_FIXED_JSON, indent=4), encoding="utf-8"
+            )
+
+            # Copy CSS from the builtin template
+            src_css = preset_dir / "explosive" / "styles.css"
+            if src_css.exists():
+                shutil.copy2(src_css, explosive_dir / "styles.css")
+
+            # Copy resources (font files) from the builtin template
+            src_resources = preset_dir / "explosive" / "resources"
+            dst_resources = explosive_dir / "resources"
+            if src_resources.is_dir():
+                if dst_resources.exists():
+                    shutil.rmtree(dst_resources)
+                shutil.copytree(src_resources, dst_resources)
+
+            _local_templates_dir = tmp
+            logger.info("Created pycaps local template overrides at %s", tmp)
+            return tmp
+
+        except Exception as exc:
+            logger.warning("Could not create pycaps local template overrides: %s", exc)
+            return None
+
+
+# Lock to guard os.chdir() calls (process-wide side effect)
+_cwd_lock = threading.Lock()
+
+
+def get_template_css(template: str) -> str | None:
+    """Read the actual CSS for a pycaps template from the installed package."""
+    preset_dir = _pycaps_preset_dir()
+    if not preset_dir:
+        return None
+    css_path = preset_dir / template / "styles.css"
+    if css_path.exists():
+        return css_path.read_text(encoding="utf-8")
+    return None
+
+
+def get_template_layout(template: str) -> dict | None:
+    """Read the layout/vertical_align config from a pycaps template JSON."""
+    preset_dir = _pycaps_preset_dir()
+    if not preset_dir:
+        return None
+    config_path = preset_dir / template / "pycaps.template.json"
+    if config_path.exists():
+        try:
+            data = json.loads(config_path.read_text(encoding="utf-8"))
+            return data.get("layout", {})
+        except Exception:
+            pass
+    return None
+
+
+def get_template_resource_path(template: str, filename: str) -> Path | None:
+    """Return the path to a resource file (font, etc.) inside a pycaps template."""
+    preset_dir = _pycaps_preset_dir()
+    if not preset_dir:
+        return None
+    # Resources may be in a 'resources' subfolder or directly in the template dir
+    for candidate in [
+        preset_dir / template / "resources" / filename,
+        preset_dir / template / filename,
+    ]:
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def build_pycaps_transcript(
@@ -106,6 +275,10 @@ def build_pycaps_transcript(
 
 
 NOTO_SANS_ARABIC_FONT_PATHS = [
+    # Bundled in the app's own fonts directory (highest priority)
+    str(Path(__file__).parent.parent.parent / "fonts" / "NotoSansArabic-Regular.ttf"),
+    "/app/fonts/NotoSansArabic-Regular.ttf",
+    # System-installed fallbacks
     "/usr/share/fonts/Noto_Sans_Arabic/NotoSansArabic-VariableFont_wdth,wght.ttf",
     "/usr/share/fonts/Noto_Sans_Arabic/static/NotoSansArabic-Regular.ttf",
     "/usr/share/fonts/Noto_Sans_Arabic/static/NotoSansArabic.ttf",
@@ -153,40 +326,72 @@ def _build_rtl_css(font_options: dict | None = None) -> str | None:
     if not use_rtl and not force_arabic_font:
         return None
 
-    css_parts = []
+    # Each entry is a bare property declaration without trailing semicolon;
+    # they will be joined with ";\n    " when assembled into the rule body.
+    segment_props: list[str] = []
+    word_props: list[str] = []
     font_face_css = ""
 
     if use_rtl:
-        css_parts.append("direction: rtl;")
-        css_parts.append("text-align: right;")
-        css_parts.append("unicode-bidi: embed;")
+        segment_props += ["direction: rtl", "text-align: right", "unicode-bidi: embed"]
 
     if force_arabic_font:
         font_path = _find_available_font(NOTO_SANS_ARABIC_FONT_PATHS)
         if font_path:
-            font_face_css = f"""@font-face {{
-    font-family: 'NotoSansArabic';
-    src: url('file://{font_path}');
-    font-weight: normal;
-    font-style: normal;
-}}
+            font_face_css = (
+                "@font-face {\n"
+                "    font-family: 'NotoSansArabic';\n"
+                f"    src: url('file://{font_path}');\n"
+                "    font-weight: normal;\n"
+                "    font-style: normal;\n"
+                "}\n\n"
+            )
+            segment_props.append("font-family: 'NotoSansArabic', sans-serif")
+            word_props.append("font-family: 'NotoSansArabic', sans-serif")
 
-"""
-            css_parts.append("font-family: 'NotoSansArabic', sans-serif;")
-
-    if not css_parts:
+    if not segment_props:
         return None
 
-    segment_css = '; '.join(css_parts)
-    word_css = '; '.join(css_parts) if force_arabic_font else ""
+    def _rule(selector: str, props: list[str]) -> str:
+        body = ";\n    ".join(props) + ";"
+        return f"{selector} {{\n    {body}\n}}"
 
-    return f"""{font_face_css}.segment {{
-    {segment_css}
-}}
+    parts = [font_face_css, _rule(".segment", segment_props)]
+    if word_props:
+        parts.append(_rule(".word", word_props))
 
-.word {{
-    {word_css}
-}}"""
+    return "\n\n".join(p for p in parts if p)
+
+
+def _build_style_css(subtitle_style: dict) -> str | None:
+    """Build CSS overrides from a subtitle_style dict (font_size, font_weight, etc.)."""
+    if not subtitle_style:
+        return None
+
+    import re as _re
+    _HEX = _re.compile(r"^#[0-9A-Fa-f]{6}$")
+    parts: list[str] = []
+
+    font_size = subtitle_style.get("font_size")
+    if isinstance(font_size, (int, float)) and 8 <= font_size <= 120:
+        parts.append(f"  font-size: {int(font_size)}px !important;")
+
+    font_weight = subtitle_style.get("font_weight")
+    if isinstance(font_weight, (int, float)) and 100 <= font_weight <= 900:
+        parts.append(f"  font-weight: {int(font_weight)} !important;")
+
+    letter_spacing = subtitle_style.get("letter_spacing")
+    if isinstance(letter_spacing, (int, float)) and 0 <= letter_spacing <= 20:
+        parts.append(f"  letter-spacing: {letter_spacing}px !important;")
+
+    text_transform = subtitle_style.get("text_transform")
+    if text_transform in {"none", "uppercase", "lowercase", "capitalize"}:
+        parts.append(f"  text-transform: {text_transform} !important;")
+
+    if not parts:
+        return None
+
+    return ".word {\n" + "\n".join(parts) + "\n}"
 
 
 def render_pycaps_subtitles(
@@ -221,10 +426,25 @@ def render_pycaps_subtitles(
         shutil.copy2(clip_path, output_path)
         return True
 
+    # Determine if this template needs a local override (to fix pycaps animation bugs)
+    local_templates_dir: Optional[Path] = None
+    if template in _LOCALLY_OVERRIDDEN_TEMPLATES:
+        local_templates_dir = _get_local_templates_dir()
+        if local_templates_dir:
+            logger.debug("Using local template override for '%s' from %s", template, local_templates_dir)
+
     try:
         from pycaps import TemplateLoader, TranscriptFormat
 
-        builder = TemplateLoader(template).with_input_video(str(clip_path)).load(False)
+        with _cwd_lock:
+            old_cwd = os.getcwd()
+            if local_templates_dir:
+                os.chdir(str(local_templates_dir))
+            try:
+                builder = TemplateLoader(template).with_input_video(str(clip_path)).load(False)
+            finally:
+                os.chdir(old_cwd)
+
         builder.with_output_video(str(output_path))
         builder.with_transcription(transcript, TranscriptFormat.PYCAPS_JSON)
 
@@ -243,8 +463,13 @@ def render_pycaps_subtitles(
             resolved_caption_options.setdefault("force_arabic_font", True)
 
         custom_css = _build_rtl_css(resolved_caption_options)
+        style_css = _build_style_css(resolved_caption_options.get("subtitle_style", {}))
+        if custom_css and style_css:
+            custom_css = custom_css + "\n\n" + style_css
+        elif style_css:
+            custom_css = style_css
         if custom_css:
-            builder.add_css(custom_css)
+            builder.add_css_content(custom_css)
 
         pipeline = builder.build()
         pipeline.run()
@@ -274,7 +499,6 @@ def generate_template_preview(
         True on success.
     """
     import subprocess
-    import tempfile
 
     sample_transcript = {
         "segments": [

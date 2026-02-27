@@ -191,7 +191,7 @@ export function VideoPlayer({
               onChange={handleSeek}
               className="w-full h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer slider-thumb-purple"
               style={{
-                background: `linear-gradient(to right, #A855F7 0%, #A855F7 ${(currentTime / duration) * 100}%, #4B5563 ${(currentTime / duration) * 100}%, #4B5563 100%)`,
+                background: `linear-gradient(to right, #256af4 0%, #256af4 ${(currentTime / duration) * 100}%, #4B5563 ${(currentTime / duration) * 100}%, #4B5563 100%)`,
               }}
             />
           </div>

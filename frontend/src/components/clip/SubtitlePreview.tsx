@@ -50,6 +50,34 @@ function injectNotoArabicFont(apiUrl: string) {
   document.head.appendChild(style);
 }
 
+/** CSS position style for the subtitle overlay derived from pycaps vertical_align config */
+interface VerticalAlign {
+  align: "top" | "center" | "bottom";
+  offset?: number;
+}
+
+function verticalAlignToStyle(va: VerticalAlign): React.CSSProperties {
+  const offset = typeof va.offset === "number" ? va.offset : 0;
+  switch (va.align) {
+    case "center":
+      return {
+        top: `${(0.5 + offset) * 100}%`,
+        transform: "translate(-50%, -50%)",
+      };
+    case "top":
+      return {
+        top: `${offset * 100}%`,
+        transform: "translateX(-50%)",
+      };
+    case "bottom":
+    default:
+      return {
+        bottom: `${Math.abs(offset) * 100}%`,
+        transform: "translateX(-50%)",
+      };
+  }
+}
+
 export function SubtitlePreview({
   words,
   currentTime,
@@ -59,29 +87,35 @@ export function SubtitlePreview({
   className = "",
 }: SubtitlePreviewProps) {
   const [css, setCss] = useState<string>(defaultSubtitleStyles);
+  const [verticalAlign, setVerticalAlign] = useState<VerticalAlign>({ align: "bottom" });
   const [activeWordIndex, setActiveWordIndex] = useState<number>(-1);
 
-  // Load pycaps-equivalent CSS for the selected template + inject Arabic font
-  // Re-fetch whenever font_size changes so the template CSS reflects the same base size
+  // Fetch the REAL pycaps CSS from the backend (read from the installed package).
+  // The backend rewrites font URLs and adds .word-active alias for .word-being-narrated
+  // so what we render here matches exactly what pycaps burns into the video.
   useEffect(() => {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
     injectNotoArabicFont(apiUrl);
 
     const load = async () => {
       try {
-        const params = subtitleStyle?.font_size != null
-          ? `?font_size=${subtitleStyle.font_size}`
-          : "";
-        const res = await fetch(`${apiUrl}/pycaps-templates/${template}/styles${params}`);
+        const params = new URLSearchParams();
+        if (subtitleStyle?.font_size != null) params.set("font_size", String(subtitleStyle.font_size));
+        if (subtitleStyle?.font_weight != null) params.set("font_weight", String(subtitleStyle.font_weight));
+        if (subtitleStyle?.letter_spacing != null) params.set("letter_spacing", String(subtitleStyle.letter_spacing));
+        if (subtitleStyle?.text_transform) params.set("text_transform", subtitleStyle.text_transform);
+        const qs = params.toString() ? `?${params.toString()}` : "";
+        const res = await fetch(`${apiUrl}/pycaps-templates/${template}/styles${qs}`);
         if (!res.ok) { setCss(defaultSubtitleStyles); return; }
         const data = await res.json();
         setCss(data.css || defaultSubtitleStyles);
+        if (data.vertical_align) setVerticalAlign(data.vertical_align);
       } catch {
         setCss(defaultSubtitleStyles);
       }
     };
     load();
-  }, [template, subtitleStyle?.font_size]);
+  }, [template, subtitleStyle?.font_size, subtitleStyle?.font_weight, subtitleStyle?.letter_spacing, subtitleStyle?.text_transform]);
 
   // Convert absolute video time → clip-relative ms, then find active word
   useEffect(() => {
@@ -105,14 +139,13 @@ export function SubtitlePreview({
         className={`subtitle-preview ${className}`}
         style={{
           position: "absolute",
-          bottom: "18%",
           left: "50%",
-          transform: "translateX(-50%)",
           width: "90%",
           textAlign: "center",
           pointerEvents: "none",
           zIndex: 10,
           direction: isRTL ? "rtl" : "ltr",
+          ...verticalAlignToStyle(verticalAlign),
         }}
       >
         <div
@@ -133,11 +166,10 @@ export function SubtitlePreview({
                 style={{
                   display: "inline-block",
                   margin: "0 3px",
+                  // font_size/font_weight/letter_spacing/text_transform are applied
+                  // via the CSS fetched from /pycaps-templates/{template}/styles,
+                  // which uses the same _build_style_css() logic as the backend renderer.
                   ...(isRTL ? { fontFamily: "'NotoSansArabic', sans-serif" } : {}),
-                  ...(subtitleStyle?.font_size != null ? { fontSize: `${subtitleStyle.font_size}px` } : {}),
-                  ...(subtitleStyle?.font_weight != null ? { fontWeight: subtitleStyle.font_weight } : {}),
-                  ...(subtitleStyle?.letter_spacing != null ? { letterSpacing: `${subtitleStyle.letter_spacing}px` } : {}),
-                  ...(subtitleStyle?.text_transform ? { textTransform: subtitleStyle.text_transform as React.CSSProperties["textTransform"] } : {}),
                 }}
               >
                 {word.text}
@@ -150,28 +182,25 @@ export function SubtitlePreview({
   );
 }
 
+// Fallback CSS used only when the backend /styles fetch fails.
+// No .segment background — the real pycaps templates don't have one.
 export const defaultSubtitleStyles = `
-.subtitle-preview {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-}
-.segment {
-  background: rgba(0,0,0,0.80);
-  border-radius: 10px;
-  padding: 10px 20px;
-  backdrop-filter: blur(8px);
-}
 .word {
-  font-size: 26px;
+  font-family: sans-serif;
+  font-size: 24px;
   font-weight: 800;
   color: #ffffff;
-  text-shadow: 2px 2px 6px rgba(0,0,0,0.9);
-  padding: 3px 6px;
-  transition: all 0.15s ease;
+  text-transform: uppercase;
+  text-shadow:
+    -2px -2px 2px #000,
+     2px -2px 2px #000,
+    -2px  2px 2px #000,
+     2px  2px 2px #000;
+  padding: 4px 4px;
   display: inline-block;
 }
-.word-active {
-  color: #ffd700;
-  transform: scale(1.15);
-  text-shadow: 2px 2px 6px rgba(0,0,0,0.9), 0 0 16px rgba(255,215,0,0.55);
+.word-active, .word-being-narrated {
+  background-color: #f76f00;
+  border-radius: 5%;
 }
 `;

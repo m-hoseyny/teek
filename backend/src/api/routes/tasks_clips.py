@@ -190,20 +190,12 @@ async def retry_clips_generation(task_id: str, request: Request, db: AsyncSessio
             db, task_id, "processing", progress=55, progress_message="Re-analyzing transcript with AI for new clips..."
         )
 
-        # Extract prompt_id and clips_count from task metadata for the retry
-        task_metadata = task.get("metadata") or {}
-        retry_prompt_id = task_metadata.get("prompt_id")
-        retry_clips_count = task_metadata.get("clips_count")
-
         # Enqueue job for AI analysis and clip creation (without re-transcribing)
+        # All config (prompt_id, clips_count, ai_provider) is fetched from DB by the worker
         from ...workers.job_queue import JobQueue
         job_id = await JobQueue.enqueue_job(
             "retry_clips_analysis",
             task_id,
-            user_id,
-            transcript,
-            retry_prompt_id,
-            retry_clips_count,
             queue_name=config.arq_queue_name,
         )
 
@@ -251,19 +243,25 @@ async def generate_clips_from_transcript(task_id: str, request: Request, db: Asy
         if not clips:
             raise HTTPException(status_code=400, detail="No clips found for this task")
 
-        # Merge body options (transitions_enabled, aspect_ratio) into task metadata
+        # Merge body options into task metadata
+        from ...pycaps_renderer import AVAILABLE_TEMPLATES as _PYCAPS_TEMPLATES
         VALID_RATIOS = {"9:16", "1:1", "16:9"}
         metadata_updates: dict = {}
         if "transitions_enabled" in body:
             metadata_updates["transitions_enabled"] = bool(body["transitions_enabled"])
         if "aspect_ratio" in body and body["aspect_ratio"] in VALID_RATIOS:
             metadata_updates["aspect_ratio"] = body["aspect_ratio"]
+        if "subtitle_style" in body and isinstance(body["subtitle_style"], dict):
+            from ...subtitle_style import normalize_subtitle_style
+            metadata_updates["subtitle_style"] = normalize_subtitle_style(body["subtitle_style"])
+        if "pycaps_template" in body and body["pycaps_template"] in _PYCAPS_TEMPLATES:
+            metadata_updates["pycaps_template"] = body["pycaps_template"]
 
         if metadata_updates:
             existing_metadata = task.get("metadata") or {}
             existing_metadata.update(metadata_updates)
             await db.execute(
-                text("UPDATE tasks SET task_metadata = :metadata, updated_at = NOW() WHERE id = :task_id"),
+                text("UPDATE tasks SET task_metadata = CAST(:metadata AS jsonb), updated_at = NOW() WHERE id = :task_id"),
                 {"metadata": json.dumps(existing_metadata), "task_id": task_id},
             )
             await db.commit()
@@ -560,6 +558,14 @@ async def render_clip(
 
         # Get caption options for RTL and custom font support
         caption_options = data.get("caption_options") or {}
+
+        # Merge subtitle_style: task metadata baseline + per-request overrides
+        task_metadata = task.get("metadata") or {}
+        task_subtitle_style = task_metadata.get("subtitle_style", {})
+        request_subtitle_style = caption_options.get("subtitle_style", {})
+        merged_subtitle_style = {**task_subtitle_style, **request_subtitle_style}
+        if merged_subtitle_style:
+            caption_options["subtitle_style"] = merged_subtitle_style
 
         from ...pycaps_renderer import AVAILABLE_TEMPLATES, render_pycaps_subtitles
         if template not in AVAILABLE_TEMPLATES:

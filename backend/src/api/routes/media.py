@@ -1,7 +1,8 @@
 """
 Media API routes (fonts, transitions, uploads, pycaps templates).
 """
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, Query, Request
+from typing import Optional
 from fastapi.responses import FileResponse
 from pathlib import Path
 import logging
@@ -223,6 +224,13 @@ async def upload_video(video: UploadFile = File(...)):
 # PyCaps template endpoints
 # ---------------------------------------------------------------------------
 
+@router.get("/subtitle-style/defaults")
+async def get_subtitle_style_defaults():
+    """Return the default subtitle style settings."""
+    from ...subtitle_style import DEFAULT_SUBTITLE_STYLE
+    return {"defaults": DEFAULT_SUBTITLE_STYLE}
+
+
 @router.get("/pycaps-templates")
 async def get_pycaps_templates():
     """Return the list of available pycaps caption templates."""
@@ -274,11 +282,39 @@ async def get_pycaps_template_preview(template_name: str):
     )
 
 
+@router.get("/pycaps-templates/{template_name}/resources/{filename}")
+async def get_pycaps_template_resource(template_name: str, filename: str):
+    """Serve a resource file (font, etc.) from a pycaps template's resources directory."""
+    from ...pycaps_renderer import get_template_resource_path
+    import re
+    if not re.match(r'^[A-Za-z0-9_.\-]+$', filename):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    resource_path = get_template_resource_path(template_name, filename)
+    if not resource_path:
+        raise HTTPException(status_code=404, detail=f"Resource '{filename}' not found for template '{template_name}'")
+    ext = Path(filename).suffix.lower()
+    media_types = {".ttf": "font/ttf", ".woff": "font/woff", ".woff2": "font/woff2", ".otf": "font/otf"}
+    return FileResponse(
+        path=str(resource_path),
+        media_type=media_types.get(ext, "application/octet-stream"),
+        headers={"Cache-Control": "public, max-age=31536000", "Access-Control-Allow-Origin": "*"},
+    )
+
+
 @router.get("/pycaps-templates/{template_name}/styles")
-async def get_pycaps_template_styles(template_name: str):
+async def get_pycaps_template_styles(
+    request: Request,
+    template_name: str,
+    font_size: Optional[int] = Query(None, ge=8, le=120),
+    font_weight: Optional[int] = Query(None, ge=100, le=900),
+    letter_spacing: Optional[float] = Query(None, ge=0, le=20),
+    text_transform: Optional[str] = Query(None),
+):
     """
-    Return the CSS styles for a pycaps template for frontend subtitle preview.
-    Since pycaps renders to video, we provide equivalent CSS for browser preview.
+    Return the actual pycaps CSS for a template so the frontend preview
+    matches exactly what will be burned into the video.
+    Font URLs are rewritten to point to our resources endpoint so the browser
+    loads the same font files that pycaps uses.
     """
     if template_name not in PYCAPS_TEMPLATES:
         raise HTTPException(
@@ -286,113 +322,52 @@ async def get_pycaps_template_styles(template_name: str):
             detail=f"Template '{template_name}' not found. Available: {PYCAPS_TEMPLATES}",
         )
 
-    # Template-specific CSS styles that mimic pycaps rendering
-    template_styles = {
-        "word-focus": """
-            .segment {
-                background: rgba(0, 0, 0, 0.85);
-                border-radius: 12px;
-                padding: 12px 24px;
-                backdrop-filter: blur(10px);
-                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-            }
-            .word {
-                font-size: 28px;
-                font-weight: 800;
-                color: #ffffff;
-                text-shadow: 3px 3px 6px rgba(0, 0, 0, 0.9);
-                transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-                padding: 4px 8px;
-                display: inline-block;
-            }
-            .word-active {
-                color: #ffd700;
-                transform: scale(1.15);
-                text-shadow: 3px 3px 6px rgba(0, 0, 0, 0.9),
-                            0 0 20px rgba(255, 215, 0, 0.6);
-            }
-        """,
-        "explosive": """
-            .segment {
-                background: linear-gradient(135deg, rgba(255, 0, 0, 0.9), rgba(255, 140, 0, 0.9));
-                border-radius: 16px;
-                padding: 16px 28px;
-                border: 3px solid #fff;
-                box-shadow: 0 6px 30px rgba(255, 0, 0, 0.5);
-            }
-            .word {
-                font-size: 32px;
-                font-weight: 900;
-                color: #ffffff;
-                text-shadow: 4px 4px 8px rgba(0, 0, 0, 1);
-                text-transform: uppercase;
-                transition: all 0.2s ease;
-                padding: 6px 10px;
-                display: inline-block;
-            }
-            .word-active {
-                color: #ffff00;
-                transform: scale(1.3) rotate(-2deg);
-                text-shadow: 4px 4px 8px rgba(0, 0, 0, 1),
-                            0 0 30px rgba(255, 255, 0, 0.8);
-            }
-        """,
-        "minimalist": """
-            .segment {
-                background: rgba(255, 255, 255, 0.95);
-                border-radius: 8px;
-                padding: 10px 20px;
-                box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
-            }
-            .word {
-                font-size: 24px;
-                font-weight: 600;
-                color: #333333;
-                transition: all 0.15s ease;
-                padding: 2px 6px;
-                display: inline-block;
-            }
-            .word-active {
-                color: #000000;
-                font-weight: 700;
-                transform: scale(1.05);
-            }
-        """,
-        "vibrant": """
-            .segment {
-                background: linear-gradient(135deg, rgba(138, 43, 226, 0.9), rgba(255, 20, 147, 0.9));
-                border-radius: 14px;
-                padding: 14px 26px;
-                border: 2px solid rgba(255, 255, 255, 0.5);
-                box-shadow: 0 5px 25px rgba(138, 43, 226, 0.5);
-            }
-            .word {
-                font-size: 30px;
-                font-weight: 800;
-                color: #ffffff;
-                text-shadow: 3px 3px 6px rgba(0, 0, 0, 0.8);
-                transition: all 0.18s ease;
-                padding: 5px 9px;
-                display: inline-block;
-            }
-            .word-active {
-                color: #00ffff;
-                transform: scale(1.2);
-                text-shadow: 3px 3px 6px rgba(0, 0, 0, 0.8),
-                            0 0 25px rgba(0, 255, 255, 0.7);
-            }
-        """,
-    }
+    from ...pycaps_renderer import get_template_css, get_template_layout, _build_style_css
+    import re as _re
 
-    # Default style for templates without custom CSS
-    default_css = template_styles.get("word-focus")
-    css_content = template_styles.get(template_name, default_css)
+    # Read the real CSS from the installed pycaps package
+    raw_css = get_template_css(template_name) or ""
+
+    # Rewrite relative font URLs to our resources endpoint so the browser can load them
+    base_url = str(request.base_url).rstrip("/")
+    resources_base = f"{base_url}/pycaps-templates/{template_name}/resources"
+    css_content = _re.sub(
+        r"url\(['\"]?([A-Za-z0-9_.\-]+\.(?:ttf|woff2?|otf))['\"]?\)",
+        lambda m: f"url('{resources_base}/{m.group(1)}')",
+        raw_css,
+    )
+
+    # Add .word-active as an alias for .word-being-narrated so the frontend
+    # class matches the real pycaps active-word class without any visual difference
+    css_content = css_content.replace(
+        ".word-being-narrated",
+        ".word-active, .word-being-narrated",
+    )
+
+    # Apply subtitle_style overrides using the same _build_style_css() logic
+    # that pycaps_renderer uses when burning subtitles
+    subtitle_style: dict = {}
+    if font_size is not None:
+        subtitle_style["font_size"] = font_size
+    if font_weight is not None:
+        subtitle_style["font_weight"] = font_weight
+    if letter_spacing is not None:
+        subtitle_style["letter_spacing"] = letter_spacing
+    if text_transform is not None:
+        subtitle_style["text_transform"] = text_transform
+    style_css = _build_style_css(subtitle_style)
+    if style_css:
+        css_content += "\n" + style_css
+
+    # Return position info from the template's vertical_align config
+    # so the frontend can place the preview overlay in the same location
+    layout = get_template_layout(template_name) or {}
+    vertical_align = layout.get("vertical_align", {"align": "bottom"})
 
     return {
         "template": template_name,
         "css": css_content,
-        "class_prefix": "pycaps",
-        "segment_class": "segment",
+        "vertical_align": vertical_align,
         "word_class": "word",
         "word_active_class": "word-active",
     }

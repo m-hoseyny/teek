@@ -44,9 +44,13 @@ class TaskService:
         url: str,
         title: Optional[str] = None,
         pycaps_template: str = "word-focus",
+        transitions_enabled: bool = False,
         transcription_provider: str = "assemblyai",
         ai_provider: str = "openai",
+        ai_model: Optional[str] = None,
+        ai_routing_mode: Optional[str] = None,
         transcript_review_enabled: bool = False,
+        transcription_options: Optional[Dict[str, Any]] = None,
         prompt_id: Optional[str] = None,
         clips_count: Optional[int] = None,
     ) -> str:
@@ -83,12 +87,18 @@ class TaskService:
             url=url
         )
 
-        # Build metadata with pycaps_template, prompt_id and clips_count for traceability
-        metadata: Dict[str, Any] = {"pycaps_template": pycaps_template}
-        if prompt_id:
-            metadata["prompt_id"] = prompt_id
-        if clips_count is not None:
-            metadata["clips_count"] = clips_count
+        # Save ALL task config to metadata so workers only need task_id
+        metadata: Dict[str, Any] = {
+            "url": url,
+            "source_type": source_type,
+            "pycaps_template": pycaps_template,
+            "transitions_enabled": transitions_enabled,
+            "ai_model": ai_model,
+            "ai_routing_mode": ai_routing_mode,
+            "transcription_options": transcription_options or {},
+            "prompt_id": prompt_id,
+            "clips_count": clips_count,
+        }
 
         # Create task
         task_id = await self.task_repo.create_task(
@@ -99,6 +109,8 @@ class TaskService:
             transcription_provider=transcription_provider,
             ai_provider=ai_provider,
             transcript_review_enabled=transcript_review_enabled,
+            pycaps_template=pycaps_template,
+            transitions_enabled=transitions_enabled,
             metadata=metadata,
         )
 

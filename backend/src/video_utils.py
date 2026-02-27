@@ -1518,6 +1518,7 @@ def create_optimized_clip(
     error_collector: Optional[List[str]] = None,
     use_pycaps: bool = False,
     pycaps_template: Optional[str] = None,
+    caption_options: Optional[Dict[str, Any]] = None,
     target_ratio: float = 9 / 16,
 ) -> bool:
     """Create optimized 9:16 clip with word-timed subtitles."""
@@ -1590,6 +1591,7 @@ def create_optimized_clip(
                     output_path=output_path,
                     transcript=pycaps_transcript,
                     template=pycaps_template,
+                    caption_options=caption_options,
                 )
 
                 # Clean up temp file
@@ -1756,6 +1758,7 @@ def create_clips_from_segments(
                 error_collector=clip_errors,
                 use_pycaps=use_pycaps,
                 pycaps_template=pycaps_template,
+                caption_options=caption_options,
                 target_ratio=target_ratio,
             )
 
