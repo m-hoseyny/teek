@@ -57,6 +57,7 @@ CREATE TABLE sources (
     id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4()::text,
     type VARCHAR(20) CHECK (type IN ('youtube', 'video_url', 'uploaded_file')) NOT NULL,
     title VARCHAR(500) NOT NULL,
+    url TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -83,6 +84,14 @@ CREATE TABLE tasks (
     -- Caption options (task-level defaults)
     pycaps_template VARCHAR(50) DEFAULT 'word-focus',
     transitions_enabled BOOLEAN DEFAULT false,
+
+    -- Transcript review fields
+    transcript_review_enabled BOOLEAN NOT NULL DEFAULT false,
+    editable_transcript TEXT,
+    reviewed_at TIMESTAMP WITH TIME ZONE,
+
+    -- JSON metadata for task configuration (url, ai_model, transcription_options, etc.)
+    task_metadata TEXT,
 
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
