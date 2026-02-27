@@ -78,12 +78,13 @@ export function ClipModal({ clip, isOpen, onClose }: ClipModalProps) {
             {/* Left - Video Player */}
             <div className="col-span-2">
               <div className="rounded-xl overflow-hidden bg-black flex items-center justify-center">
-                <VideoPlayer
-                  src={clip.videoUrl}
-                  poster={clip.thumbnail}
-                  aspectRatio={clip.aspectRatio as "9:16" | "1:1" | "16:9" | "auto"}
-                  className="max-h-[600px]"
-                />
+                <div className={clip.aspectRatio === "9:16" ? "w-[280px]" : "w-full"}>
+                  <VideoPlayer
+                    src={clip.videoUrl}
+                    poster={clip.thumbnail}
+                    aspectRatio={clip.aspectRatio as "9:16" | "1:1" | "16:9" | "auto"}
+                  />
+                </div>
               </div>
 
               {/* Description */}
