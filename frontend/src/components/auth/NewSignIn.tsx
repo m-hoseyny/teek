@@ -44,8 +44,8 @@ export function NewSignIn() {
             <Zap className="w-7 h-7 text-white" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-white">ViralFinder AI</h1>
-            <p className="text-xs text-purple-400">VIDEO OPTIMIZER</p>
+            <h1 className="text-2xl font-bold text-white">Teek Studio</h1>
+            <p className="text-xs text-blue-400">VIDEO OPTIMIZER</p>
           </div>
         </Link>
 

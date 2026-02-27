@@ -133,7 +133,7 @@ export function ProcessingView({ taskStatus }: ProcessingViewProps) {
     <div className="max-w-5xl mx-auto">
       {/* Header */}
       <div className="mb-8">
-        <div className="flex items-center gap-2 text-purple-400 mb-2">
+        <div className="flex items-center gap-2 text-blue-400 mb-2">
           <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 16 16">
             <path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492zM5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0z"/>
             <path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.893 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52l-.094-.319z"/>
@@ -163,7 +163,7 @@ export function ProcessingView({ taskStatus }: ProcessingViewProps) {
                     cx="80"
                     cy="80"
                     r="70"
-                    stroke="rgba(168, 85, 247, 0.2)"
+                    stroke="rgba(37, 106, 244, 0.2)"
                     strokeWidth="8"
                     fill="none"
                   />
@@ -180,8 +180,8 @@ export function ProcessingView({ taskStatus }: ProcessingViewProps) {
                   />
                   <defs>
                     <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor="#A855F7" />
-                      <stop offset="100%" stopColor="#6366F1" />
+                      <stop offset="0%" stopColor="#256af4" />
+                      <stop offset="100%" stopColor="#3b82f6" />
                     </linearGradient>
                   </defs>
                 </svg>
@@ -261,10 +261,18 @@ export function ProcessingView({ taskStatus }: ProcessingViewProps) {
                   {/* Content */}
                   <div className="flex-1">
                     <h3 className="font-semibold text-white mb-1">{step.title}</h3>
-                    <p className="text-sm text-muted-foreground">
-                      {step.description}
-                      {step.status === "active" && step.progress && ` (${step.progress}%)`}
-                    </p>
+                    <p className="text-sm text-muted-foreground">{step.description}</p>
+                    {step.status === "active" && step.progress !== undefined && step.progress > 0 && (
+                      <div className="mt-2 flex items-center gap-3">
+                        <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-purple transition-all duration-300"
+                            style={{ width: `${step.progress}%` }}
+                          />
+                        </div>
+                        <span className="text-xs font-mono text-primary w-10 text-right">{step.progress}%</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

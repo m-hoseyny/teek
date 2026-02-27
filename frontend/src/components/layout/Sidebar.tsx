@@ -27,8 +27,8 @@ export function Sidebar() {
             <Zap className="w-6 h-6 text-white" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-white">ViralFinder AI</h1>
-            <p className="text-xs text-purple-400">VIDEO OPTIMIZER</p>
+            <h1 className="text-xl font-bold text-white">Teek Studio</h1>
+            <p className="text-xs text-blue-400">VIDEO OPTIMIZER</p>
           </div>
         </Link>
       </div>
@@ -57,10 +57,10 @@ export function Sidebar() {
 
       {/* Pro Plan Widget */}
       <div className="p-4">
-        <div className="glass rounded-xl p-4 border border-purple-500/30">
-          <div className="text-xs font-semibold text-purple-400 mb-2">PRO PLAN</div>
+        <div className="glass rounded-xl p-4 border border-blue-500/30">
+          <div className="text-xs font-semibold text-blue-400 mb-2">PRO PLAN</div>
           <p className="text-sm text-white mb-3">
-            You have <span className="font-bold text-purple-400">{credits}</span> analysis credits remaining.
+            You have <span className="font-bold text-blue-400">{credits}</span> analysis credits remaining.
           </p>
           <button className="w-full py-2 px-4 rounded-lg bg-gradient-purple hover:bg-gradient-purple-hover text-white text-sm font-semibold transition-all glow-purple">
             Upgrade
