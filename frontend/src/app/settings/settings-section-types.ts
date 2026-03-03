@@ -4,7 +4,7 @@ import {
   type FontStyleOptions,
 } from "@/lib/font-style-options";
 
-export const SETTINGS_SECTIONS = ["font", "video", "transcription", "ai"] as const;
+export const SETTINGS_SECTIONS = ["font", "video", "transcription", "ai", "plan"] as const;
 
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
@@ -76,6 +76,10 @@ export const SETTINGS_SECTION_META: Record<SettingsSection, { label: string; des
   ai: {
     label: "AI",
     description: "LLM provider, model, and AI API keys.",
+  },
+  plan: {
+    label: "Plan",
+    description: "Your subscription plan and usage.",
   },
 };
 

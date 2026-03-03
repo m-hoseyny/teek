@@ -14,6 +14,7 @@ import { SettingsSaveStatus } from "./components/settings-save-status";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { SettingsSectionAi } from "./components/settings-section-ai";
 import { SettingsSectionFont } from "./components/settings-section-font";
+import { SettingsSectionPlan } from "./components/settings-section-plan";
 import { SettingsSectionTranscription } from "./components/settings-section-transcription";
 import { SettingsSectionVideo } from "./components/settings-section-video";
 import { SettingsSidebar } from "./components/settings-sidebar";
@@ -968,7 +969,8 @@ function SettingsPageContent() {
               <div>
                 <p className="text-sm font-semibold text-white">{SETTINGS_SECTION_META[activeSection].label}</p>
                 <p className="text-xs text-gray-400">
-                  {SETTINGS_SECTION_META[activeSection].description} Use Save to apply changes.
+                  {SETTINGS_SECTION_META[activeSection].description}
+                  {activeSection !== "plan" && " Use Save to apply changes."}
                 </p>
               </div>
               <SettingsSaveStatus isDirty={isDirty} isSaving={isSavingPreferences} saveError={saveError} />
@@ -1117,6 +1119,8 @@ function SettingsPageContent() {
                   void deleteAssemblyKey();
                 }}
               />
+            ) : activeSection === "plan" ? (
+              <SettingsSectionPlan />
             ) : (
               <SettingsSectionAi
                 isSaving={isSavingPreferences}
@@ -1198,31 +1202,33 @@ function SettingsPageContent() {
               />
             )}
 
-            <div className="mt-6 flex justify-end">
-              <Button
-                type="button"
-                variant={isDirty ? "default" : "outline"}
-                className={
-                  isDirty
-                    ? "border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-500"
-                    : "border-gray-500/60 text-gray-200"
-                }
-                onClick={() => {
-                  void savePreferences();
-                }}
-                disabled={isSavingPreferences || !isDirty}
-              >
-                {isSavingPreferences
-                  ? "Saving..."
-                  : activeSection === "font"
-                    ? "Save Fonts"
-                    : activeSection === "video"
-                      ? "Save Video"
-                      : activeSection === "transcription"
-                        ? "Save Transcription"
-                        : "Save AI"}
-              </Button>
-            </div>
+            {activeSection !== "plan" && (
+              <div className="mt-6 flex justify-end">
+                <Button
+                  type="button"
+                  variant={isDirty ? "default" : "outline"}
+                  className={
+                    isDirty
+                      ? "border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-500"
+                      : "border-gray-500/60 text-gray-200"
+                  }
+                  onClick={() => {
+                    void savePreferences();
+                  }}
+                  disabled={isSavingPreferences || !isDirty}
+                >
+                  {isSavingPreferences
+                    ? "Saving..."
+                    : activeSection === "font"
+                      ? "Save Fonts"
+                      : activeSection === "video"
+                        ? "Save Video"
+                        : activeSection === "transcription"
+                          ? "Save Transcription"
+                          : "Save AI"}
+                </Button>
+              </div>
+            )}
           </section>
         </div>
     </div>
