@@ -1,11 +1,9 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AlertCircle, Settings } from "lucide-react";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -13,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSession } from "@/lib/auth-client";
 import { SettingsSaveStatus } from "./components/settings-save-status";
-import { Header } from "@/components/header";
+import { AppLayout } from "@/components/layout/AppLayout";
 import { SettingsSectionAi } from "./components/settings-section-ai";
 import { SettingsSectionFont } from "./components/settings-section-font";
 import { SettingsSectionTranscription } from "./components/settings-section-transcription";
@@ -895,7 +893,7 @@ function SettingsPageContent() {
 
   if (isPending || isFetching) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center p-4">
+      <div className="flex items-center justify-center h-64">
         <div className="space-y-4">
           <Skeleton className="h-4 w-32 mx-auto" />
           <Skeleton className="h-4 w-48 mx-auto" />
@@ -907,73 +905,69 @@ function SettingsPageContent() {
 
   if (!session?.user) {
     return (
-      <div className="min-h-screen bg-white">
-        <div className="max-w-4xl mx-auto px-4 py-24">
-          <div className="text-center">
-            <h1 className="text-3xl font-bold text-black mb-4">Sign In Required</h1>
-            <p className="text-gray-600 mb-8">You need to sign in to access your settings</p>
-            <Link href="/sign-in">
-              <Button size="lg">Sign In</Button>
-            </Link>
-          </div>
+      <div className="max-w-4xl mx-auto px-4 py-24">
+        <div className="text-center">
+          <h1 className="text-3xl font-bold text-white mb-4">Sign In Required</h1>
+          <p className="text-gray-400 mb-8">You need to sign in to access your settings</p>
+          <Link href="/sign-in">
+            <Button size="lg">Sign In</Button>
+          </Link>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-white">
-      <Header />
-      <div className="max-w-7xl mx-auto px-4 py-10">
-        <div className="mb-6">
-          <div className="flex items-center gap-2 mb-2">
-            <Settings className="w-6 h-6 text-black" />
-            <h2 className="text-2xl font-bold text-black">Settings</h2>
-          </div>
-          <p className="text-gray-600">
-            Configure your default preferences for video clip generation and per-user API keys.
-          </p>
+    <div className="max-w-7xl mx-auto">
+      <div className="mb-8">
+        <div className="flex items-center gap-2 mb-2">
+          <Settings className="w-6 h-6 text-white" />
+          <h1 className="text-3xl font-bold text-white">Settings</h1>
         </div>
+        <p className="text-gray-400">
+          Configure your default preferences for video clip generation and per-user API keys.
+        </p>
+      </div>
 
-        <div className="md:hidden mb-4 space-y-2">
-          <Label className="text-sm font-medium text-black">Section</Label>
-          <Select
-            value={activeSection}
-            onValueChange={(value) => {
-              if (isSettingsSection(value)) {
-                void handleSectionChange(value);
-              }
-            }}
-            disabled={isSavingPreferences}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Select section" />
-            </SelectTrigger>
-            <SelectContent>
-              {SETTINGS_SECTIONS.map((section) => (
-                <SelectItem key={section} value={section}>
-                  {SETTINGS_SECTION_META[section].label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+      <div className="md:hidden mb-4 space-y-2">
+        <Label className="text-sm font-medium text-white">Section</Label>
+        <Select
+          value={activeSection}
+          onValueChange={(value) => {
+            if (isSettingsSection(value)) {
+              void handleSectionChange(value);
+            }
+          }}
+          disabled={isSavingPreferences}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Select section" />
+          </SelectTrigger>
+          <SelectContent>
+            {SETTINGS_SECTIONS.map((section) => (
+              <SelectItem key={section} value={section}>
+                {SETTINGS_SECTION_META[section].label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
 
-        <div className="grid md:grid-cols-[260px_1fr] gap-6">
-          <SettingsSidebar
-            sections={sectionNavItems}
-            activeSection={activeSection}
-            isSaving={isSavingPreferences}
-            onSectionSelect={(section) => {
-              void handleSectionChange(section);
-            }}
-          />
+      <div className="grid md:grid-cols-[260px_1fr] gap-6">
+        <SettingsSidebar
+          sections={sectionNavItems}
+          activeSection={activeSection}
+          isSaving={isSavingPreferences}
+          onSectionSelect={(section) => {
+            void handleSectionChange(section);
+          }}
+        />
 
-          <section className="rounded-lg border border-gray-200 bg-white p-4 sm:p-6">
+          <section className="glass rounded-xl border border-border p-4 sm:p-6">
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="text-sm font-semibold text-black">{SETTINGS_SECTION_META[activeSection].label}</p>
-                <p className="text-xs text-gray-500">
+                <p className="text-sm font-semibold text-white">{SETTINGS_SECTION_META[activeSection].label}</p>
+                <p className="text-xs text-gray-400">
                   {SETTINGS_SECTION_META[activeSection].description} Use Save to apply changes.
                 </p>
               </div>
@@ -1231,14 +1225,13 @@ function SettingsPageContent() {
             </div>
           </section>
         </div>
-      </div>
     </div>
   );
 }
 
 function SettingsPageFallback() {
   return (
-    <div className="min-h-screen bg-white flex items-center justify-center p-4">
+    <div className="flex items-center justify-center h-64">
       <div className="space-y-4">
         <Skeleton className="h-4 w-32 mx-auto" />
         <Skeleton className="h-4 w-48 mx-auto" />
@@ -1250,8 +1243,10 @@ function SettingsPageFallback() {
 
 export default function SettingsPage() {
   return (
-    <Suspense fallback={<SettingsPageFallback />}>
-      <SettingsPageContent />
-    </Suspense>
+    <AppLayout>
+      <Suspense fallback={<SettingsPageFallback />}>
+        <SettingsPageContent />
+      </Suspense>
+    </AppLayout>
   );
 }
