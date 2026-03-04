@@ -1,14 +1,27 @@
 "use client";
 
-import { Bell, Search, User } from "lucide-react";
+import { Bell, Menu, Search, User } from "lucide-react";
 import { useSession } from "@/lib/auth-client";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
-export function TopBar() {
+interface TopBarProps {
+  onMenuClick?: () => void;
+}
+
+export function TopBar({ onMenuClick }: TopBarProps) {
   const { data: session } = useSession();
 
   return (
-    <div className="h-16 border-b border-sidebar-border bg-card/50 backdrop-blur-sm px-6 flex items-center justify-between">
+    <div className="h-16 border-b border-sidebar-border bg-card/50 backdrop-blur-sm px-4 md:px-6 flex items-center gap-3">
+      {/* Hamburger — mobile only */}
+      <button
+        className="md:hidden p-2 rounded-lg hover:bg-card transition-colors text-gray-400 hover:text-white flex-shrink-0"
+        onClick={onMenuClick}
+        aria-label="Open menu"
+      >
+        <Menu className="w-5 h-5" />
+      </button>
+
       {/* Search Bar */}
       <div className="flex-1 max-w-xl">
         <div className="relative">
@@ -22,7 +35,7 @@ export function TopBar() {
       </div>
 
       {/* Right Section */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-2 md:gap-4 flex-shrink-0">
         {/* Notifications */}
         <button className="relative p-2 rounded-lg hover:bg-card transition-colors">
           <Bell className="w-5 h-5 text-gray-400" />

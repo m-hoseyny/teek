@@ -132,49 +132,50 @@ export function ProcessingView({ taskStatus }: ProcessingViewProps) {
   return (
     <div className="max-w-5xl mx-auto">
       {/* Header */}
-      <div className="mb-8">
+      <div className="mb-6 md:mb-8">
         <div className="flex items-center gap-2 text-blue-400 mb-2">
-          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 16 16">
+          <svg className="w-4 h-4 md:w-5 md:h-5" fill="currentColor" viewBox="0 0 16 16">
             <path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492zM5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0z"/>
             <path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.893 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52l-.094-.319z"/>
           </svg>
-          <span className="font-medium">Processing & Analysis</span>
+          <span className="font-medium text-sm md:text-base">Processing & Analysis</span>
         </div>
-        <h1 className="text-4xl font-bold text-white mb-3">
+        <h1 className="text-2xl md:text-4xl font-bold text-white mb-2 md:mb-3 line-clamp-2">
           {taskStatus?.source_title || "Analyzing your video..."}
         </h1>
-        <p className="text-gray-400 text-lg">
+        <p className="text-gray-400 text-sm md:text-lg">
           {taskStatus?.status === "failed"
             ? "Processing failed. Please try again."
             : "Our AI is identifying viral hooks, high-energy moments, and potential trending highlights."}
         </p>
       </div>
 
-      <div className="grid grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
         {/* Left Column - Progress */}
-        <div className="col-span-2 space-y-6">
+        <div className="col-span-1 md:col-span-2 space-y-4 md:space-y-6">
           {/* Progress Ring & Bar */}
-          <div className="glass rounded-2xl p-8">
-            <div className="flex items-center justify-between mb-6">
-              {/* Circular Progress */}
-              <div className="relative">
-                <svg className="w-40 h-40 transform -rotate-90">
+          <div className="glass rounded-2xl p-5 md:p-8">
+            {/* Ring + bar: row on md+, column on mobile */}
+            <div className="flex flex-col md:flex-row md:items-center gap-6 mb-0 md:mb-6">
+              {/* Circular Progress — centered on mobile */}
+              <div className="relative flex-shrink-0 self-center w-32 h-32 md:w-40 md:h-40">
+                <svg className="w-full h-full transform -rotate-90" viewBox="0 0 128 128">
                   <circle
-                    cx="80"
-                    cy="80"
-                    r="70"
+                    cx="64"
+                    cy="64"
+                    r="54"
                     stroke="rgba(37, 106, 244, 0.2)"
                     strokeWidth="8"
                     fill="none"
                   />
                   <circle
-                    cx="80"
-                    cy="80"
-                    r="70"
+                    cx="64"
+                    cy="64"
+                    r="54"
                     stroke="url(#gradient)"
                     strokeWidth="8"
                     fill="none"
-                    strokeDasharray={`${(overallProgress / 100) * 440} 440`}
+                    strokeDasharray={`${(overallProgress / 100) * 339} 339`}
                     strokeLinecap="round"
                     className="transition-all duration-300"
                   />
@@ -186,13 +187,13 @@ export function ProcessingView({ taskStatus }: ProcessingViewProps) {
                   </defs>
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <div className="text-4xl font-bold text-white">{overallProgress}%</div>
-                  <div className="text-sm text-primary font-medium uppercase tracking-wide">Current Task</div>
+                  <div className="text-3xl md:text-4xl font-bold text-white">{overallProgress}%</div>
+                  <div className="text-xs md:text-sm text-primary font-medium uppercase tracking-wide">Current Task</div>
                 </div>
               </div>
 
               {/* Overall Progress Bar */}
-              <div className="flex-1 ml-8">
+              <div className="flex-1 w-full">
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-sm font-medium text-gray-300">Overall Progress</span>
                   <span className="text-sm text-primary font-semibold">Step {currentStepIndex + 1} of 4</span>
@@ -205,7 +206,7 @@ export function ProcessingView({ taskStatus }: ProcessingViewProps) {
                 </div>
 
                 {/* Notify Toggle */}
-                <div className="flex items-center gap-3 mt-6">
+                <div className="flex items-center gap-3 mt-5 md:mt-6">
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input
                       type="checkbox"
@@ -218,7 +219,7 @@ export function ProcessingView({ taskStatus }: ProcessingViewProps) {
                   <span className="text-sm text-gray-300">Notify me when finished</span>
                 </div>
 
-                <button className="mt-4 px-6 py-2 rounded-lg border border-border hover:border-primary text-sm text-gray-300 hover:text-white transition-colors">
+                <button className="mt-3 md:mt-4 px-6 py-2 rounded-lg border border-border hover:border-primary text-sm text-gray-300 hover:text-white transition-colors">
                   Cancel Analysis
                 </button>
               </div>
@@ -226,7 +227,7 @@ export function ProcessingView({ taskStatus }: ProcessingViewProps) {
           </div>
 
           {/* Processing Steps */}
-          <div className="space-y-3">
+          <div className="space-y-2 md:space-y-3">
             {steps.map((step, index) => (
               <div
                 key={step.id}
@@ -281,7 +282,7 @@ export function ProcessingView({ taskStatus }: ProcessingViewProps) {
         </div>
 
         {/* Right Column - Preview & Status */}
-        <div className="space-y-6">
+        <div className="space-y-4 md:space-y-6">
           {/* Video Preview */}
           <div className="glass rounded-2xl p-4">
             <div className="aspect-video bg-black rounded-lg flex items-center justify-center mb-3 overflow-hidden">
@@ -353,7 +354,7 @@ export function ProcessingView({ taskStatus }: ProcessingViewProps) {
 
       {/* Bottom Notification */}
       {notifyWhenFinished && (
-        <div className="mt-6 glass rounded-xl p-4 border-l-4 border-primary flex items-center gap-3">
+        <div className="mt-4 md:mt-6 glass rounded-xl p-4 border-l-4 border-primary flex items-center gap-3">
           <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center">
             <svg className="w-5 h-5 text-primary" fill="currentColor" viewBox="0 0 16 16">
               <path d="M8 16a2 2 0 0 0 2-2H6a2 2 0 0 0 2 2zM8 1.918l-.797.161A4.002 4.002 0 0 0 4 6c0 .628-.134 2.197-.459 3.742-.16.767-.376 1.566-.663 2.258h10.244c-.287-.692-.502-1.49-.663-2.258C12.134 8.197 12 6.628 12 6a4.002 4.002 0 0 0-3.203-3.92L8 1.917zM14.22 12c.223.447.481.801.78 1H1c.299-.199.557-.553.78-1C2.68 10.2 3 6.88 3 6c0-2.42 1.72-4.44 4.005-4.901a1 1 0 1 1 1.99 0A5.002 5.002 0 0 1 13 6c0 .88.32 4.2 1.22 6z"/>

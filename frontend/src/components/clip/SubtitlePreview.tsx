@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import type React from "react";
 
 // Matches Arabic, Hebrew, and other RTL scripts
@@ -88,7 +88,20 @@ export function SubtitlePreview({
 }: SubtitlePreviewProps) {
   const [css, setCss] = useState<string>(defaultSubtitleStyles);
   const [verticalAlign, setVerticalAlign] = useState<VerticalAlign>({ align: "bottom" });
-  const [activeWordIndex, setActiveWordIndex] = useState<number>(-1);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  // Track container width to scale subtitle font sizes proportionally
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      setContainerWidth(entries[0].contentRect.width);
+    });
+    ro.observe(el);
+    setContainerWidth(el.getBoundingClientRect().width);
+    return () => ro.disconnect();
+  }, []);
 
   // Fetch the REAL pycaps CSS from the backend (read from the installed package).
   // The backend rewrites font URLs and adds .word-active alias for .word-being-narrated
@@ -117,12 +130,15 @@ export function SubtitlePreview({
     load();
   }, [template, subtitleStyle?.font_size, subtitleStyle?.font_weight, subtitleStyle?.letter_spacing, subtitleStyle?.text_transform]);
 
-  // Convert absolute video time → clip-relative ms, then find active word
-  useEffect(() => {
-    const relativeMs = (currentTime - clipStartSeconds) * 1000;
-    const idx = words.findIndex((w) => relativeMs >= w.start && relativeMs < w.end);
-    setActiveWordIndex(idx);
-  }, [currentTime, clipStartSeconds, words]);
+  // Convert absolute video time → clip-relative ms, then find active word (derived, no state)
+  const relativeMs = (currentTime - clipStartSeconds) * 1000;
+  const activeWordIndex = words.findIndex((w) => relativeMs >= w.start && relativeMs < w.end);
+
+  // Scale subtitle font sizes to match the container width.
+  // CSS values from the backend are tuned for a ~600px player (containerWidth ≈ 540px = 90%).
+  // On narrower screens we scale down proportionally, capped at 1 so desktop is unchanged.
+  const REFERENCE_WIDTH = 540;
+  const scale = containerWidth > 0 ? Math.min(1, containerWidth / REFERENCE_WIDTH) : 1;
 
   // Show active word + 1 before + 2 after for context
   const windowStart = activeWordIndex <= 0 ? 0 : activeWordIndex - 1;
@@ -136,6 +152,7 @@ export function SubtitlePreview({
     <>
       <style dangerouslySetInnerHTML={{ __html: css }} />
       <div
+        ref={containerRef}
         className={`subtitle-preview ${className}`}
         style={{
           position: "absolute",
@@ -152,6 +169,7 @@ export function SubtitlePreview({
           className="segment"
           style={{
             display: "inline-block",
+            zoom: scale,
             direction: isRTL ? "rtl" : "ltr",
             ...(isRTL ? { fontFamily: "'NotoSansArabic', sans-serif" } : {}),
           }}

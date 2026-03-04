@@ -158,17 +158,17 @@ export default function AnalysisPage() {
     <AppLayout>
       <div className="max-w-6xl mx-auto">
         {/* Header */}
-        <div className="mb-8">
+        <div className="mb-6 md:mb-8">
           <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
             <span>Library</span>
             <span>•</span>
             <span className="text-primary">New Analysis</span>
           </div>
-          <h1 className="text-3xl font-bold text-white">Import & Configure</h1>
+          <h1 className="text-2xl md:text-3xl font-bold text-white">Import & Configure</h1>
         </div>
 
         {/* Main Content Grid */}
-        <div className="grid grid-cols-2 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6 md:mb-8">
           {/* Left Card - Import Video */}
           <div className="glass rounded-2xl p-6">
             <div className="flex items-center gap-3 mb-6">
@@ -364,7 +364,7 @@ export default function AnalysisPage() {
         </div>
 
         {/* Clip Configuration Card */}
-        <div className="glass rounded-2xl p-6 mb-8">
+        <div className="glass rounded-2xl p-5 md:p-6 mb-6 md:mb-8">
           <div className="flex items-center gap-3 mb-6">
             <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center">
               <Sparkles className="w-5 h-5 text-primary" />
@@ -372,7 +372,7 @@ export default function AnalysisPage() {
             <h2 className="text-xl font-semibold text-white">3. Clip Configuration</h2>
           </div>
 
-          <div className="grid grid-cols-2 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
             {/* Clip Style */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-3">CLIP STYLE</label>
@@ -414,7 +414,7 @@ export default function AnalysisPage() {
                   <Minus className="w-4 h-4" />
                 </button>
                 <div className="flex-1 text-center">
-                  <div className="text-5xl font-bold text-white tabular-nums">{clipsCount}</div>
+                  <div className="text-4xl md:text-5xl font-bold text-white tabular-nums">{clipsCount}</div>
                   <div className="text-xs text-gray-500 mt-1">clips</div>
                 </div>
                 <button
@@ -484,18 +484,18 @@ export default function AnalysisPage() {
         </button>
 
         {/* Footer Stats */}
-        <div className="grid grid-cols-3 gap-6 mt-8">
+        <div className="grid grid-cols-3 gap-3 md:gap-6 mt-6 md:mt-8">
           <div className="text-center">
-            <div className="text-2xl font-bold text-white mb-1">~2 min</div>
-            <div className="text-sm text-muted-foreground">EST. DURATION</div>
+            <div className="text-xl md:text-2xl font-bold text-white mb-1">~2 min</div>
+            <div className="text-xs md:text-sm text-muted-foreground">EST. DURATION</div>
           </div>
           <div className="text-center">
-            <div className="text-2xl font-bold text-white mb-1">4K HDR</div>
-            <div className="text-sm text-muted-foreground">MAX QUALITY</div>
+            <div className="text-xl md:text-2xl font-bold text-white mb-1">4K HDR</div>
+            <div className="text-xs md:text-sm text-muted-foreground">MAX QUALITY</div>
           </div>
           <div className="text-center">
-            <div className="text-2xl font-bold text-white mb-1">24 Languages</div>
-            <div className="text-sm text-muted-foreground">SUPPORTED</div>
+            <div className="text-xl md:text-2xl font-bold text-white mb-1">24 Languages</div>
+            <div className="text-xs md:text-sm text-muted-foreground">SUPPORTED</div>
           </div>
         </div>
       </div>

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Sparkles, Video, Wand2, Settings, Zap } from "lucide-react";
+import { LayoutDashboard, Sparkles, Video, Wand2, Settings, Zap, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/lib/auth-client";
 
@@ -28,7 +28,12 @@ interface SubscriptionData {
   clip_generations: UsageStat;
 }
 
-export function Sidebar() {
+interface SidebarProps {
+  isOpen?: boolean;
+  onClose?: () => void;
+}
+
+export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { data: session } = useSession();
   const [subscription, setSubscription] = useState<SubscriptionData | null>(null);
@@ -54,10 +59,18 @@ export function Sidebar() {
   const clipsRemaining = subscription?.clip_generations?.remaining;
 
   return (
-    <div className="w-64 bg-sidebar border-r border-sidebar-border flex flex-col">
+    <aside
+      className={cn(
+        // Mobile: fixed overlay drawer, slide in/out
+        "fixed inset-y-0 left-0 z-30 w-64 bg-sidebar border-r border-sidebar-border flex flex-col transition-transform duration-300 ease-in-out",
+        "md:relative md:translate-x-0 md:z-auto",
+        // On mobile, hidden when closed
+        isOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+      )}
+    >
       {/* Logo */}
-      <div className="p-6">
-        <Link href="/" className="flex items-center gap-3">
+      <div className="p-6 flex items-center justify-between">
+        <Link href="/" className="flex items-center gap-3" onClick={onClose}>
           <div className="w-10 h-10 rounded-xl bg-gradient-purple flex items-center justify-center glow-purple">
             <Zap className="w-6 h-6 text-white" />
           </div>
@@ -66,6 +79,14 @@ export function Sidebar() {
             <p className="text-xs text-blue-400">VIDEO OPTIMIZER</p>
           </div>
         </Link>
+        {/* Close button — mobile only */}
+        <button
+          className="md:hidden p-1 rounded-lg text-gray-400 hover:text-white hover:bg-card transition-colors"
+          onClick={onClose}
+          aria-label="Close menu"
+        >
+          <X className="w-5 h-5" />
+        </button>
       </div>
 
       {/* Navigation */}
@@ -76,6 +97,7 @@ export function Sidebar() {
             <Link
               key={item.name}
               href={item.href}
+              onClick={onClose}
               className={cn(
                 "flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all",
                 isActive
@@ -129,12 +151,13 @@ export function Sidebar() {
           )}
           <Link
             href="/settings"
+            onClick={onClose}
             className="block w-full py-2 px-4 rounded-lg bg-gradient-purple hover:bg-gradient-purple-hover text-white text-sm font-semibold transition-all glow-purple text-center"
           >
             {subscription?.plan === "free" ? "Upgrade" : "Manage Plan"}
           </Link>
         </div>
       </div>
-    </div>
+    </aside>
   );
 }

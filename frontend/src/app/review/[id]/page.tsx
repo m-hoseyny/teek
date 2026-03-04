@@ -335,16 +335,16 @@ export default function ReviewPage() {
     <AppLayout>
       <div className="max-w-[1600px] mx-auto">
         {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-white mb-2">Review & Edit Transcript</h1>
+        <div className="mb-4 md:mb-6">
+          <h1 className="text-xl md:text-2xl font-bold text-white mb-1 md:mb-2">Review & Edit Transcript</h1>
           <p className="text-gray-400">{task.source?.title || "Video Analysis"}</p>
         </div>
 
-        <div className="grid grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
           {/* Left Column - Video Player */}
-          <div className="col-span-2 space-y-6">
+          <div className="col-span-1 lg:col-span-2 space-y-4 lg:space-y-6">
             {/* Video Player */}
-            <div className="glass rounded-2xl p-6">
+            <div className="glass rounded-2xl p-4 md:p-6">
               {/* Subtitle toggle */}
               <div className="flex items-center justify-between mb-3">
                 <span className="text-sm text-gray-400">
@@ -470,7 +470,7 @@ export default function ReviewPage() {
             </div>
 
             {/* Clip Timeline */}
-            <div className="glass rounded-2xl p-6">
+            <div className="glass rounded-2xl p-4 md:p-6">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
@@ -635,7 +635,7 @@ export default function ReviewPage() {
               <button
                 onClick={handleGenerateClips}
                 disabled={isGenerating}
-                className="flex-1 h-14 rounded-xl bg-gradient-purple hover:bg-gradient-purple-hover disabled:opacity-50 text-white font-bold text-lg transition-all glow-purple flex items-center justify-center gap-2"
+                className="flex-1 h-12 md:h-14 rounded-xl bg-gradient-purple hover:bg-gradient-purple-hover disabled:opacity-50 text-white font-bold text-base md:text-lg transition-all glow-purple flex items-center justify-center gap-2"
               >
                 {isGenerating ? (
                   <>
@@ -653,7 +653,7 @@ export default function ReviewPage() {
           </div>
 
           {/* Right Column */}
-          <div className="space-y-6">
+          <div className="space-y-4 md:space-y-6">
             {/* Tabs */}
             <div className="flex gap-2 border-b border-border">
               <button
@@ -678,7 +678,7 @@ export default function ReviewPage() {
 
             {/* Transcript Panel */}
             {activeTab === "transcript" && (
-              <div className="glass rounded-2xl p-6">
+              <div className="glass rounded-2xl p-4 md:p-6">
                 <h3 className="font-semibold text-white uppercase tracking-wide mb-4">Transcript</h3>
                 <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
                   {segments.map((segment) => {
@@ -713,7 +713,7 @@ export default function ReviewPage() {
             )}
 
             {/* Caption Styles — loaded dynamically from backend */}
-            <div className="glass rounded-2xl p-6">
+            <div className="glass rounded-2xl p-4 md:p-6">
               <h3 className="font-semibold text-white uppercase tracking-wide mb-4">Caption Style</h3>
 
               {isLoadingTemplates ? (
@@ -782,7 +782,7 @@ export default function ReviewPage() {
             </div>
 
             {/* Aspect Ratio */}
-            <div className="glass rounded-2xl p-6">
+            <div className="glass rounded-2xl p-4 md:p-6">
               <h3 className="font-semibold text-white uppercase tracking-wide mb-4">Clip Ratio</h3>
               <div className="flex gap-3">
                 {(
@@ -814,7 +814,7 @@ export default function ReviewPage() {
             </div>
 
             {/* Transitions Toggle */}
-            <div className="glass rounded-2xl p-6">
+            <div className="glass rounded-2xl p-4 md:p-6">
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="font-semibold text-white">Transition Effects</h3>

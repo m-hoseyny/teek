@@ -180,9 +180,9 @@ export function VideoPlayer({
 
       {/* Custom Controls */}
       {controls && (
-        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 opacity-0 group-hover:opacity-100 transition-opacity rounded-b-lg">
+        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-3 pb-3 pt-6 opacity-0 group-hover:opacity-100 transition-opacity rounded-b-lg">
           {/* Progress Bar */}
-          <div className="mb-3">
+          <div className="mb-2">
             <input
               type="range"
               min="0"
@@ -196,69 +196,55 @@ export function VideoPlayer({
             />
           </div>
 
-          {/* Controls Row */}
-          <div className="flex items-center justify-between gap-4">
-            {/* Left Controls */}
-            <div className="flex items-center gap-3">
+          {/* Controls Row — compact to fit narrow players */}
+          <div className="flex items-center justify-between gap-1">
+            {/* Left: Play + Mute + Time */}
+            <div className="flex items-center gap-1 min-w-0">
               {/* Play/Pause */}
               <button
                 onClick={togglePlay}
-                className="w-9 h-9 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
+                className="w-7 h-7 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors flex-shrink-0"
               >
                 {isPlaying ? (
-                  <Pause className="w-5 h-5 text-white" fill="currentColor" />
+                  <Pause className="w-3.5 h-3.5 text-white" fill="currentColor" />
                 ) : (
-                  <Play className="w-5 h-5 text-white ml-0.5" fill="currentColor" />
+                  <Play className="w-3.5 h-3.5 text-white ml-0.5" fill="currentColor" />
                 )}
               </button>
 
-              {/* Volume */}
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={toggleMute}
-                  className="w-9 h-9 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
-                >
-                  {isMuted || volume === 0 ? (
-                    <VolumeX className="w-5 h-5 text-white" />
-                  ) : (
-                    <Volume2 className="w-5 h-5 text-white" />
-                  )}
-                </button>
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.1"
-                  value={isMuted ? 0 : volume}
-                  onChange={handleVolumeChange}
-                  className="w-20 h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer slider-thumb-purple"
-                />
-              </div>
+              {/* Mute toggle (no slider — saves space) */}
+              <button
+                onClick={toggleMute}
+                className="w-7 h-7 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors flex-shrink-0"
+              >
+                {isMuted || volume === 0 ? (
+                  <VolumeX className="w-3.5 h-3.5 text-white" />
+                ) : (
+                  <Volume2 className="w-3.5 h-3.5 text-white" />
+                )}
+              </button>
 
               {/* Time */}
-              <span className="text-sm text-white font-mono">
+              <span className="text-xs text-white/80 font-mono truncate">
                 {formatTime(currentTime)} / {formatTime(duration)}
               </span>
             </div>
 
-            {/* Right Controls */}
-            <div className="flex items-center gap-2">
-              {/* Download */}
+            {/* Right: Download + Fullscreen */}
+            <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={handleDownload}
-                className="w-9 h-9 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
+                className="w-7 h-7 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
                 title="Download"
               >
-                <Download className="w-5 h-5 text-white" />
+                <Download className="w-3.5 h-3.5 text-white" />
               </button>
-
-              {/* Fullscreen */}
               <button
                 onClick={toggleFullscreen}
-                className="w-9 h-9 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
+                className="w-7 h-7 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
                 title="Fullscreen"
               >
-                <Maximize className="w-5 h-5 text-white" />
+                <Maximize className="w-3.5 h-3.5 text-white" />
               </button>
             </div>
           </div>
