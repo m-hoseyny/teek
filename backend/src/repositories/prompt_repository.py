@@ -85,8 +85,8 @@ SEGMENT SELECTION CRITERIA:
 5. KNOWLEDGE GAPS: Explanations that bridge understanding
 
 TIMING GUIDELINES:
-- Segments MUST be between 15-60 seconds for educational content
-- CRITICAL: start_time MUST be different from end_time (minimum 15 seconds apart)
+- Segments MUST be between 30-120 seconds for educational content
+- CRITICAL: start_time MUST be different from end_time (minimum 30 seconds apart)
 - Ensure complete explanations without cutting off mid-thought
 - Include context so the lesson makes sense standalone
 
@@ -94,10 +94,10 @@ TIMESTAMP REQUIREMENTS - EXTREMELY IMPORTANT:
 - Use EXACT timestamps as they appear in the transcript
 - Never modify timestamp format (keep MM:SS structure)
 - start_time MUST be LESS THAN end_time (start_time < end_time)
-- MINIMUM segment duration: 15 seconds (end_time - start_time >= 15 seconds)
+- MINIMUM segment duration: 30 seconds (end_time - start_time >= 30 seconds)
 - Look at transcript ranges like [02:25 - 02:35] and use different start/end times
 - NEVER use the same timestamp for both start_time and end_time
-- Example: start_time: "02:25", end_time: "02:35" (NOT "02:25" and "02:25")
+- Example: start_time: "02:25", end_time: "02:55" (NOT "02:25" and "02:25")
 
 Find {clips_count} educational segments that work as standalone learning clips. Focus on the most teachable moments that provide clear value.""",
 )
