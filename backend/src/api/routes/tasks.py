@@ -2,6 +2,7 @@
 Task API routes using refactored architecture.
 """
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 from typing import Optional, Any, Dict
@@ -69,6 +70,69 @@ async def list_tasks(request: Request, db: AsyncSession = Depends(get_db), limit
     except Exception as e:
         logger.error(f"Error retrieving user tasks: {e}")
         raise HTTPException(status_code=500, detail=f"Error retrieving tasks: {str(e)}")
+
+
+@router.get("/dashboard")
+async def get_dashboard_stats(request: Request, db: AsyncSession = Depends(get_db)):
+    """Get dashboard stats for the authenticated user."""
+    user_id = _require_user_id(request)
+
+    try:
+        stats_result = await db.execute(
+            text("""
+                SELECT
+                    COUNT(DISTINCT t.id) AS total_tasks,
+                    COUNT(gc.id) AS total_clips,
+                    COALESCE(AVG(gc.relevance_score), 0) AS avg_virality_score
+                FROM tasks t
+                LEFT JOIN generated_clips gc ON t.id = gc.task_id
+                WHERE t.user_id = :user_id
+            """),
+            {"user_id": user_id},
+        )
+        stats_row = stats_result.fetchone()
+
+        total_tasks = int(stats_row.total_tasks or 0)
+        total_clips = int(stats_row.total_clips or 0)
+        avg_virality = float(stats_row.avg_virality_score or 0)
+
+        recent_result = await db.execute(
+            text("""
+                SELECT t.id, COALESCE(s.title, '') AS title, t.status, t.created_at,
+                       COUNT(gc.id) AS clips_count,
+                       COALESCE(AVG(gc.relevance_score), 0) AS avg_virality
+                FROM tasks t
+                LEFT JOIN sources s ON t.source_id = s.id
+                LEFT JOIN generated_clips gc ON t.id = gc.task_id
+                WHERE t.user_id = :user_id
+                GROUP BY t.id, s.title
+                ORDER BY t.created_at DESC
+                LIMIT 5
+            """),
+            {"user_id": user_id},
+        )
+
+        recent_tasks = []
+        for row in recent_result.fetchall():
+            recent_tasks.append({
+                "id": str(row.id),
+                "title": row.title or f"Task {str(row.id)[:8]}",
+                "status": row.status,
+                "clips_count": int(row.clips_count),
+                "avg_virality": round(float(row.avg_virality), 1),
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            })
+
+        return {
+            "total_tasks": total_tasks,
+            "total_clips": total_clips,
+            "avg_virality_score": round(avg_virality, 1),
+            "recent_tasks": recent_tasks,
+        }
+
+    except Exception as e:
+        logger.error(f"Error fetching dashboard stats: {e}")
+        raise HTTPException(status_code=500, detail=f"Error fetching dashboard stats: {str(e)}")
 
 
 @router.get("/prompts")
