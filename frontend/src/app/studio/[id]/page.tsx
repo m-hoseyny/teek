@@ -69,6 +69,7 @@ export default function StudioPage() {
   const [genProgress, setGenProgress] = useState<GenProgress>({
     progress: 0, message: "Generating clips…", clipsCompleted: 0, clipsTotal: 0,
   });
+  const [videoObjectUrl, setVideoObjectUrl] = useState<string | null>(null);
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -172,6 +173,41 @@ export default function StudioPage() {
     return () => { eventSourceRef.current?.close(); if (pollRef.current) clearInterval(pollRef.current); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId, session?.user?.id]);
+
+  // Fetch selected clip video as a blob to avoid static-file URL issues
+  useEffect(() => {
+    if (!selectedClip?.filename) {
+      setVideoObjectUrl(null);
+      return;
+    }
+
+    let objectUrl: string | null = null;
+    let cancelled = false;
+
+    const fetchVideo = async () => {
+      setVideoObjectUrl(null);
+      try {
+        const headers: Record<string, string> = {};
+        if (session?.user?.id) headers["user_id"] = session.user.id;
+        const res = await fetch(`${apiUrl}/clips/${selectedClip.filename}`, { headers });
+        if (!cancelled && res.ok) {
+          const blob = await res.blob();
+          objectUrl = URL.createObjectURL(blob);
+          setVideoObjectUrl(objectUrl);
+        }
+      } catch (e) {
+        console.error("Failed to fetch clip video:", e);
+      }
+    };
+
+    fetchVideo();
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      setVideoObjectUrl(null);
+    };
+  }, [selectedClip?.filename, apiUrl, session?.user?.id]);
 
   const handleDeleteClip = async (clipId: string) => {
     if (!session?.user?.id) return;
@@ -349,10 +385,17 @@ export default function StudioPage() {
                           {/* Video */}
                           <div className="flex justify-center">
                             <div className={`w-full ${maxW} relative`}>
-                              <VideoPlayer
-                                src={`${apiUrl}/clips/${selectedClip.filename}`}
-                                aspectRatio={ar}
-                              />
+                              {videoObjectUrl ? (
+                                <VideoPlayer
+                                  src={videoObjectUrl}
+                                  aspectRatio={ar}
+                                />
+                              ) : (
+                                <div className="flex flex-col items-center justify-center gap-3 py-16">
+                                  <Loader2 className="w-8 h-8 text-primary animate-spin" />
+                                  <p className="text-gray-400 text-sm">Loading video…</p>
+                                </div>
+                              )}
                               {isProcessing && (
                                 <div className="absolute inset-0 z-20 rounded-lg bg-black/60 flex flex-col items-center justify-center gap-2 cursor-not-allowed">
                                   <Loader2 className="w-8 h-8 text-primary animate-spin" />
@@ -364,14 +407,16 @@ export default function StudioPage() {
 
                           {/* Action Buttons — directly below video, inside same section */}
                           <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-border">
-                            <a
-                              href={`${apiUrl}/clips/${selectedClip.filename}`}
-                              download
-                              className="flex-1 min-w-[100px] h-10 rounded-lg bg-gradient-purple hover:opacity-90 text-white font-semibold transition-all flex items-center justify-center gap-2 text-sm"
-                            >
-                              <Download className="w-4 h-4" />
-                              Download
-                            </a>
+                            {videoObjectUrl && (
+                              <a
+                                href={videoObjectUrl}
+                                download={selectedClip.filename}
+                                className="flex-1 min-w-[100px] h-10 rounded-lg bg-gradient-purple hover:opacity-90 text-white font-semibold transition-all flex items-center justify-center gap-2 text-sm"
+                              >
+                                <Download className="w-4 h-4" />
+                                Download
+                              </a>
+                            )}
                             <button className="h-10 px-4 rounded-lg bg-muted hover:bg-muted/80 text-white font-medium transition-all flex items-center gap-2 text-sm">
                               <Share2 className="w-4 h-4" />
                               Share
