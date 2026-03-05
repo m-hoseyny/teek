@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Sparkles, Video, Wand2, Settings, Zap, X } from "lucide-react";
+import { LayoutDashboard, Sparkles, Video, Wand2, Settings, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/lib/auth-client";
 
@@ -71,9 +72,7 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
       {/* Logo */}
       <div className="p-6 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-3" onClick={onClose}>
-          <div className="w-10 h-10 rounded-xl bg-gradient-purple flex items-center justify-center glow-purple">
-            <Zap className="w-6 h-6 text-white" />
-          </div>
+          <Image src="/brand/logo.png" alt="Teek Studio" width={40} height={40} className="h-10 w-auto" />
           <div>
             <h1 className="text-xl font-bold text-white">Teek Studio</h1>
             <p className="text-xs text-blue-400">VIDEO OPTIMIZER</p>
