@@ -582,6 +582,115 @@ async def retry_task(task_id: str, request: Request, db: AsyncSession = Depends(
         raise HTTPException(status_code=500, detail=f"Error starting task retry: {str(e)}")
 
 
+@router.post("/{task_id}/reopen")
+async def reopen_task(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """
+    Reopen a completed or failed task for review.
+    Returns the task to 'awaiting_review' state so user can change subtitle
+    styles and regenerate clips.
+
+    Smart transcript detection:
+    - If clips + transcript exist: reset to awaiting_review immediately
+    - If transcript exists but no clips: enqueue AI re-analysis
+    - If no transcript: enqueue full pipeline with review stop
+    """
+    user_id = request.headers.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User authentication required")
+
+    try:
+        task_service = TaskService(db)
+        task = await task_service.task_repo.get_task_by_id(db, task_id)
+
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to access this task")
+
+        allowed_statuses = {"error", "completed", "awaiting_review"}
+        if task.get("status") not in allowed_statuses:
+            raise HTTPException(
+                status_code=400,
+                detail="Task can only be reopened from error, completed, or awaiting_review status"
+            )
+
+        transcription_provider = task.get("transcription_provider", "local")
+        transcript = task.get("editable_transcript") or task.get("source_transcript") or ""
+        clips = await task_service.clip_repo.get_clips_by_task(db, task_id)
+
+        if transcript and clips:
+            # All data available: just reset status to awaiting_review
+            await task_service.task_repo.update_task_status(
+                db, task_id, "awaiting_review", progress=70,
+                progress_message="Task reopened for review. Edit settings and regenerate clips."
+            )
+            return {
+                "message": "Task reopened for review",
+                "task_id": task_id,
+                "status": "awaiting_review",
+                "clips_count": len(clips),
+            }
+
+        elif transcript:
+            # Have transcript, need AI analysis to recreate clips
+            await task_service.clip_repo.delete_clips_by_task(db, task_id)
+            await task_service.task_repo.update_task_clips(db, task_id, [])
+            await task_service.task_repo.update_task_status(
+                db, task_id, "processing", progress=55,
+                progress_message="Re-analyzing transcript with AI for new clips..."
+            )
+            job_id = await JobQueue.enqueue_job(
+                "retry_clips_analysis",
+                task_id,
+                queue_name=config.arq_queue_name,
+            )
+            return {
+                "message": "Re-analyzing transcript for clips",
+                "task_id": task_id,
+                "status": "processing",
+                "job_id": job_id,
+            }
+
+        else:
+            # No transcript: full reprocess, stopping at awaiting_review for review
+            await task_service.clip_repo.delete_clips_by_task(db, task_id)
+            await task_service.task_repo.update_task_clips(db, task_id, [])
+
+            # Ensure transcript_review_enabled so the pipeline stops at awaiting_review
+            await db.execute(
+                text("UPDATE tasks SET transcript_review_enabled = true, updated_at = NOW() WHERE id = :task_id"),
+                {"task_id": task_id}
+            )
+            await db.commit()
+
+            queue_name = (
+                config.arq_assembly_queue_name
+                if transcription_provider == "assemblyai"
+                else config.arq_local_queue_name
+            )
+            await task_service.task_repo.update_task_status(
+                db, task_id, "queued", progress=0,
+                progress_message="Task queued for reprocessing"
+            )
+            job_id = await JobQueue.enqueue_job(
+                "transcribe_video_task",
+                task_id,
+                queue_name=queue_name,
+            )
+            return {
+                "message": "Task queued for reprocessing",
+                "task_id": task_id,
+                "status": "queued",
+                "job_id": job_id,
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error reopening task {task_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error reopening task: {str(e)}")
+
+
 @router.delete("/{task_id}")
 async def delete_task(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Delete a task and all its associated clips."""
@@ -616,12 +725,7 @@ async def delete_task(task_id: str, request: Request, db: AsyncSession = Depends
 
 @router.get("/{task_id}/source-video")
 async def get_task_source_video(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
-    """Serve the source video file for review."""
-    # EventSource in browsers cannot set custom headers, so allow query fallback.
-    user_id = request.headers.get("user_id") or request.query_params.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
-
+    """Serve the source video file for review. Publicly accessible via task_id (UUID)."""
     try:
         from pathlib import Path
         from fastapi.responses import FileResponse
@@ -632,9 +736,6 @@ async def get_task_source_video(task_id: str, request: Request, db: AsyncSession
         if not task:
             logger.error(f"Task {task_id} not found")
             raise HTTPException(status_code=404, detail="Task not found")
-        if task["user_id"] != user_id:
-            logger.error(f"User {user_id} not authorized for task {task_id}")
-            raise HTTPException(status_code=403, detail="Not authorized to access this task")
 
         # Get video path from task metadata
         metadata = task.get("metadata") or {}

@@ -19,7 +19,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useSession } from "@/lib/auth-client";
-import { ArrowLeft, Download, Clock, Star, AlertCircle, Trash2, Edit2, X, Check, FileText, Play, Save, Eye } from "lucide-react";
+import { ArrowLeft, Download, Clock, Star, AlertCircle, Trash2, Edit2, X, Check, FileText, Play, Save, Eye, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import DynamicVideoPlayer, { type VideoPlayerRef } from "@/components/dynamic-video-player";
 import { ClipPreviewModal } from "@/components/clip/ClipPreviewModal";
@@ -141,8 +141,6 @@ export default function TaskPage() {
   const [task, setTask] = useState<TaskDetails | null>(null);
   const [clips, setClips] = useState<Clip[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [sourceVideoUrl, setSourceVideoUrl] = useState<string | null>(null);
-  const [isLoadingSourceVideo, setIsLoadingSourceVideo] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [progressMessage, setProgressMessage] = useState("");
@@ -247,6 +245,7 @@ export default function TaskPage() {
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
   const taskId = Array.isArray(params.id) ? params.id[0] : params.id;
   const userId = session?.user?.id;
+  const sourceVideoUrl = task?.source_video_url ? `${apiUrl}${task.source_video_url}` : null;
 
   // Fetch transcript when task is in awaiting_review status
   const fetchTranscript = useCallback(async () => {
@@ -276,43 +275,6 @@ export default function TaskPage() {
       fetchTranscript();
     }
   }, [task?.status, fetchTranscript]);
-
-  // Fetch source video URL when task is in review or completed status
-  const fetchSourceVideo = useCallback(async () => {
-    if (!taskId || !userId) return;
-    
-    try {
-      setIsLoadingSourceVideo(true);
-      const response = await fetch(`${apiUrl}/tasks/${taskId}/source-video`, {
-        headers: { user_id: userId },
-      });
-      
-      if (!response.ok) {
-        if (response.status === 404) {
-          setSourceVideoUrl(null);
-          return;
-        }
-        throw new Error(`Failed to fetch source video: ${response.status}`);
-      }
-      
-      // Create blob URL from the video data so auth headers are properly used
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      setSourceVideoUrl(url);
-    } catch (err) {
-      console.error("Error fetching source video:", err);
-      setSourceVideoUrl(null);
-    } finally {
-      setIsLoadingSourceVideo(false);
-    }
-  }, [apiUrl, taskId, userId]);
-
-  // Fetch source video when task status changes
-  useEffect(() => {
-    if (task?.status === "awaiting_review" || task?.status === "transcribed" || task?.status === "completed") {
-      fetchSourceVideo();
-    }
-  }, [task?.status, fetchSourceVideo]);
 
   useEffect(() => {
     progressRef.current = progress;
@@ -668,6 +630,34 @@ export default function TaskPage() {
   };
 
   const [isRetrying, setIsRetrying] = useState(false);
+  const [isReopening, setIsReopening] = useState(false);
+
+  const handleReopenTask = async () => {
+    if (!userId || !taskId) return;
+
+    try {
+      setIsReopening(true);
+      setTranscriptError(null);
+
+      const response = await fetch(`${apiUrl}/tasks/${taskId}/reopen`, {
+        method: "POST",
+        headers: { user_id: userId },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({} as { detail?: string }));
+        throw new Error(errorData.detail || "Failed to reopen task");
+      }
+
+      // Refresh task status - will show review page or progress depending on result
+      await fetchTaskStatus();
+    } catch (err) {
+      console.error("Error reopening task:", err);
+      setTranscriptError(err instanceof Error ? err.message : "Failed to reopen task");
+    } finally {
+      setIsReopening(false);
+    }
+  };
 
   const handleRetryGenerateClips = async () => {
     if (!session?.user?.id || !taskId) return;
@@ -1049,13 +1039,40 @@ export default function TaskPage() {
                 <AlertCircle className="w-12 h-12 mx-auto mb-2" />
                 <h2 className="text-xl font-semibold">Processing Failed</h2>
               </div>
-              <p className="text-gray-600 mb-4">There was an error processing your video. Please try again.</p>
-              <Link href="/">
-                <Button>
-                  <ArrowLeft className="w-4 h-4" />
-                  Back to Home
+              <p className="text-gray-600 mb-4">
+                {task.progress_message || "There was an error processing your video."}
+              </p>
+              {transcriptError && (
+                <Alert className="mb-4 text-left border-red-200 bg-red-50">
+                  <AlertCircle className="h-4 w-4 text-red-500" />
+                  <AlertDescription className="text-sm text-red-700">{transcriptError}</AlertDescription>
+                </Alert>
+              )}
+              <div className="flex justify-center gap-3">
+                <Button
+                  onClick={handleReopenTask}
+                  disabled={isReopening}
+                  className="bg-blue-600 hover:bg-blue-700"
+                >
+                  {isReopening ? (
+                    <>
+                      <div className="w-4 h-4 mr-2 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Retrying...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="w-4 h-4 mr-2" />
+                      Retry
+                    </>
+                  )}
                 </Button>
-              </Link>
+                <Link href="/">
+                  <Button variant="outline">
+                    <ArrowLeft className="w-4 h-4 mr-2" />
+                    Back to Home
+                  </Button>
+                </Link>
+              </div>
             </CardContent>
           </Card>
         ) : task?.status === "awaiting_review" || task?.status === "transcribed" ? (
@@ -1297,7 +1314,7 @@ export default function TaskPage() {
                           )}
 
                           <div className="flex flex-wrap gap-2">
-                            {task?.source_video_url && (
+                            {sourceVideoUrl && (
                               <>
                                 <Button
                                   size="sm"
@@ -1431,7 +1448,7 @@ export default function TaskPage() {
         ) : (
           <div className="grid gap-6">
             {/* Source Video Player with Clip Sync */}
-            {task?.source_video_url && (
+            {sourceVideoUrl && (
               <Card className="border-gray-200 overflow-hidden">
                 <CardContent className="p-0">
                   <div className="p-4 bg-gray-50 border-b border-gray-200">
@@ -1446,7 +1463,7 @@ export default function TaskPage() {
                   <div className="bg-black">
                     <DynamicVideoPlayer
                       ref={sourcePlayerRef}
-                      src={task.source_video_url}
+                      src={sourceVideoUrl}
                       className="w-full max-h-[500px]"
                     />
                   </div>
@@ -1483,36 +1500,69 @@ export default function TaskPage() {
                 </div>
               </div>
             )}
-            {/* Retry Generate Clips Card */}
+            {/* Regenerate Options Card */}
             <Card className="border-blue-200 bg-blue-50/30">
               <CardContent className="p-6">
-                <div className="flex items-start gap-4">
-                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
-                    <Edit2 className="w-5 h-5 text-blue-600" />
+                <div className="space-y-4">
+                  {/* Back to Review option */}
+                  <div className="flex items-start gap-4">
+                    <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+                      <ArrowLeft className="w-5 h-5 text-blue-600" />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="font-semibold text-black mb-1">Change subtitle style or settings?</h3>
+                      <p className="text-sm text-gray-600 mb-4">
+                        Go back to the review page to change subtitle templates, edit clip timings, or update other settings. Your existing clips will be preserved.
+                      </p>
+                      <Button
+                        onClick={handleReopenTask}
+                        disabled={isReopening || isRetrying}
+                        variant="outline"
+                        className="border-blue-300 hover:bg-blue-100"
+                      >
+                        {isReopening ? (
+                          <>
+                            <div className="w-4 h-4 mr-2 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
+                            Reopening...
+                          </>
+                        ) : (
+                          <>
+                            <ArrowLeft className="w-4 h-4 mr-2" />
+                            Back to Review
+                          </>
+                        )}
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex-1">
-                    <h3 className="font-semibold text-black mb-1">Not happy with these clips?</h3>
-                    <p className="text-sm text-gray-600 mb-4">
-                      The AI can analyze the transcript again to find different moments. This will delete the current clips and generate new ones for you to review and edit.
-                    </p>
-                    <Button
-                      onClick={handleRetryGenerateClips}
-                      disabled={isRetrying}
-                      variant="outline"
-                      className="border-blue-300 hover:bg-blue-100"
-                    >
-                      {isRetrying ? (
-                        <>
-                          <div className="w-4 h-4 mr-2 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
-                          Re-analyzing...
-                        </>
-                      ) : (
-                        <>
-                          <Edit2 className="w-4 h-4 mr-2" />
-                          Retry Generate Clips
-                        </>
-                      )}
-                    </Button>
+
+                  <div className="border-t border-blue-200 pt-4 flex items-start gap-4">
+                    <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+                      <RefreshCw className="w-5 h-5 text-blue-600" />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="font-semibold text-black mb-1">Not happy with these clips?</h3>
+                      <p className="text-sm text-gray-600 mb-4">
+                        The AI can analyze the transcript again to find different moments. This will delete the current clips and generate new ones for you to review and edit.
+                      </p>
+                      <Button
+                        onClick={handleRetryGenerateClips}
+                        disabled={isRetrying || isReopening}
+                        variant="outline"
+                        className="border-blue-300 hover:bg-blue-100"
+                      >
+                        {isRetrying ? (
+                          <>
+                            <div className="w-4 h-4 mr-2 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
+                            Re-analyzing...
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="w-4 h-4 mr-2" />
+                            Retry Generate Clips
+                          </>
+                        )}
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </CardContent>
