@@ -10,10 +10,10 @@ export default function Home() {
   const { data: session, isPending } = useSession();
   const router = useRouter();
 
-  // Redirect authenticated users to analysis page
+  // Redirect authenticated users to dashboard
   useEffect(() => {
     if (!isPending && session?.user) {
-      router.push("/analysis");
+      router.push("/dashboard");
     }
   }, [session, isPending, router]);
 
