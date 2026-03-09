@@ -167,6 +167,77 @@ async def get_transcript_words(task_id: str, request: Request, db: AsyncSession 
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/{task_id}/transcript/ass")
+async def get_transcript_ass(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Return ASS subtitle content for the full source video transcript.
+
+    Used by the review page to render jassub subtitle overlay on the source video.
+    Words have absolute millisecond timestamps (no offset needed).
+
+    Query params:
+        template: ASS template name (default: word-focus)
+    """
+    user_id = request.headers.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User authentication required")
+
+    template = request.query_params.get("template", "word-focus")
+    font_size_param = request.query_params.get("font_size")
+
+    try:
+        task_service = TaskService(db)
+        task = await task_service.task_repo.get_task_by_id(db, task_id)
+
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to access this task")
+
+        metadata = task.get("metadata") or {}
+        video_path = metadata.get("video_path")
+        if not video_path:
+            return {"task_id": task_id, "ass_content": "", "template": template}
+
+        transcript_data = load_cached_transcript_data(Path(video_path))
+        if not transcript_data or not transcript_data.get("words"):
+            return {"task_id": task_id, "ass_content": "", "template": template}
+
+        words = [
+            {
+                "text": w.get("text", ""),
+                "start": int(w.get("start", 0)),
+                "end": int(w.get("end", 0)),
+            }
+            for w in transcript_data["words"]
+            if w.get("text", "").strip()
+        ]
+
+        from ...ass_generator import generate_ass_content, AVAILABLE_TEMPLATES, DEFAULT_TEMPLATE
+        if template not in AVAILABLE_TEMPLATES:
+            template = DEFAULT_TEMPLATE
+
+        task_subtitle_style = dict(metadata.get("subtitle_style") or {})
+        if font_size_param is not None:
+            try:
+                task_subtitle_style["font_size"] = max(8, int(font_size_param))
+            except ValueError:
+                pass
+        ass_content = generate_ass_content(
+            words=words,
+            subtitle_style=task_subtitle_style or None,
+            template=template,
+            time_offset_ms=0,
+        )
+
+        return {"task_id": task_id, "ass_content": ass_content, "template": template}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating transcript ASS: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.put("/{task_id}/transcript/segments")
 async def update_task_transcript_segments(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Update transcript segments (with timestamps) for a task."""

@@ -123,6 +123,8 @@ class TaskRepository:
         else:
             metadata = None
 
+        video_path = (metadata or {}).get("video_path")
+
         return {
             "id": row.id,
             "user_id": row.user_id,
@@ -142,6 +144,7 @@ class TaskRepository:
             "metadata": metadata,
             "source_transcript": getattr(row, "source_transcript", None),
             "editable_transcript": getattr(row, "editable_transcript", None),
+            "source_video_url": f"/tasks/{row.id}/source-video" if video_path else None,
             "created_at": row.created_at,
             "updated_at": row.updated_at
         }

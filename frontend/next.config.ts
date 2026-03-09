@@ -3,9 +3,20 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   output: 'standalone',
   devIndicators: false,
-  // Skip TypeScript errors during builds for now
   typescript: {
     ignoreBuildErrors: false,
+  },
+  async headers() {
+    return [
+      {
+        source: '/jassub-worker.js',
+        headers: [{ key: 'Content-Type', value: 'application/javascript' }],
+      },
+      {
+        source: '/jassub-worker.wasm',
+        headers: [{ key: 'Content-Type', value: 'application/wasm' }],
+      },
+    ];
   },
 };
 

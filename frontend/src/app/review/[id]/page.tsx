@@ -1,16 +1,37 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useSession } from "@/lib/auth-client";
 import { Play, Pause, Eye, EyeOff, Check, Scissors } from "lucide-react";
-import { SubtitlePreview } from "@/components/clip/SubtitlePreview";
+import { AssSubtitleRenderer } from "@/components/clip/AssSubtitleRenderer";
 
-interface Word {
-  text: string;
-  start: number; // absolute ms from video start
-  end: number;
+/**
+ * Patch the font size inside an ASS subtitle string without a network round-trip.
+ *
+ * The ASS Style line stores the base font size as the 3rd comma-separated field:
+ *   Style: Default,<FontName>,<fontSize>,…
+ *
+ * Dialogue events may also contain inline \fs{N} override tags (used by templates
+ * that scale the active word, e.g. "explosive").  We scale those proportionally so
+ * the size ratio between active and inactive words is preserved.
+ */
+function applyFontSizeToAss(ass: string, newSize: number): string {
+  const match = ass.match(/^Style: Default,[^,]+,(\d+)/m);
+  if (!match) return ass;
+  const oldSize = parseInt(match[1]);
+  if (oldSize === newSize) return ass;
+
+  // Replace the base font size in the Style line
+  let result = ass.replace(/(^Style: Default,[^,]+,)\d+/m, `$1${newSize}`);
+
+  // Scale every \fs{N} tag proportionally (covers active-word pop sizes)
+  result = result.replace(/\\fs(\d+)/g, (_, n) =>
+    `\\fs${Math.round(parseInt(n) * newSize / oldSize)}`
+  );
+
+  return result;
 }
 
 interface TranscriptSegment {
@@ -88,7 +109,6 @@ export default function ReviewPage() {
 
   const [task, setTask] = useState<TaskData | null>(null);
   const [segments, setSegments] = useState<TranscriptSegment[]>([]);
-  const [words, setWords] = useState<Word[]>([]);
   const [clips, setClips] = useState<Clip[]>([]);
   const [templates, setTemplates] = useState<PycapsTemplate[]>([]);
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
@@ -105,10 +125,18 @@ export default function ReviewPage() {
   const [savingClipId, setSavingClipId] = useState<string | null>(null);
   const [subtitleStyle, setSubtitleStyle] = useState<{ font_size: number }>({ font_size: 28 });
 
+  // baseAssContent: raw ASS from the backend (template style, default font size)
+  const [baseAssContent, setBaseAssContent] = useState<string | null>(null);
+  // assContent: font size patched client-side — instant, no network round-trip needed
+  const assContent = useMemo(
+    () => baseAssContent ? applyFontSizeToAss(baseAssContent, subtitleStyle.font_size) : null,
+    [baseAssContent, subtitleStyle.font_size]
+  );
+
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
   const animFrameRef = useRef<number>();
 
-  // Fetch task + segments + words + clips
   useEffect(() => {
     if (!session?.user?.id || !taskId) return;
     const uid = session.user.id;
@@ -126,11 +154,11 @@ export default function ReviewPage() {
       }
     };
 
-    const fetchWords = async () => {
-      const res = await fetch(`${apiUrl}/tasks/${taskId}/transcript/words`, { headers: { user_id: uid } });
+    const fetchAss = async (template: string) => {
+      const res = await fetch(`${apiUrl}/tasks/${taskId}/transcript/ass?template=${encodeURIComponent(template)}`, { headers: { user_id: uid } });
       if (res.ok) {
         const data = await res.json();
-        setWords(data.words || []);
+        setBaseAssContent(data.ass_content || null);
       }
     };
 
@@ -166,13 +194,23 @@ export default function ReviewPage() {
 
     fetchTask();
     fetchSegments();
-    fetchWords();
+    fetchAss(selectedStyle);
     fetchVideo();
     fetchClips();
     fetchSubtitleDefaults();
   }, [taskId, session?.user?.id, apiUrl]);
 
-  // Fetch available pycaps templates from the backend
+  // Re-fetch base ASS only when template changes (font size is applied client-side)
+  useEffect(() => {
+    if (!session?.user?.id || !taskId) return;
+    const uid = session.user.id;
+    fetch(`${apiUrl}/tasks/${taskId}/transcript/ass?template=${encodeURIComponent(selectedStyle)}`, { headers: { user_id: uid } })
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (data) setBaseAssContent(data.ass_content || null); })
+      .catch(() => {});
+  }, [selectedStyle, taskId, session?.user?.id, apiUrl]);
+
+  // Fetch available templates from the backend
   useEffect(() => {
     const load = async () => {
       try {
@@ -215,7 +253,10 @@ export default function ReviewPage() {
   };
 
   const handleLoadedMetadata = () => {
-    if (videoRef.current) setDuration(videoRef.current.duration);
+    if (videoRef.current) {
+      setDuration(videoRef.current.duration);
+      setVideoEl(videoRef.current);
+    }
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -348,7 +389,7 @@ export default function ReviewPage() {
               {/* Subtitle toggle */}
               <div className="flex items-center justify-between mb-3">
                 <span className="text-sm text-gray-400">
-                  {words.length > 0 ? `${words.length} words loaded` : "Loading word timings..."}
+                  {assContent ? "Subtitles ready" : "Loading subtitles..."}
                 </span>
                 <button
                   onClick={() => setShowSubtitles((v) => !v)}
@@ -379,15 +420,11 @@ export default function ReviewPage() {
                 )}
 
                 {/* Subtitle overlay */}
-                {showSubtitles && words.length > 0 && (
-                  <SubtitlePreview
-                    words={words}
-                    currentTime={currentTime}
-                    clipStartSeconds={0}
-                    template={selectedStyle}
-                    subtitleStyle={subtitleStyle}
-                  />
-                )}
+                <AssSubtitleRenderer
+                  videoElement={videoEl}
+                  assContent={assContent}
+                  enabled={showSubtitles}
+                />
 
                 {/* Ratio crop preview overlay */}
                 {(() => {

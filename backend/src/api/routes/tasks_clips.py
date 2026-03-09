@@ -112,6 +112,90 @@ async def get_clip_words(task_id: str, clip_id: str, request: Request, db: Async
         raise HTTPException(status_code=500, detail=f"Error retrieving clip words: {str(e)}")
 
 
+@router.get("/{task_id}/clips/{clip_id}/ass")
+async def get_clip_ass(
+    task_id: str,
+    clip_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return an ASS subtitle file for a clip.
+
+    The same ASS content is used by jassub-worker in the browser preview
+    and by ffmpeg when burning subtitles into the video — guaranteeing a
+    pixel-perfect match.
+
+    Query params:
+        template: ASS template name (default: clip's stored template)
+    """
+    user_id = request.headers.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User authentication required")
+
+    template_override = request.query_params.get("template")
+    clip_start_seconds_str = request.query_params.get("clip_start_seconds", "0")
+    font_size_param = request.query_params.get("font_size")
+    try:
+        time_offset_ms = int(float(clip_start_seconds_str) * 1000)
+    except ValueError:
+        time_offset_ms = 0
+
+    try:
+        task_service = TaskService(db)
+
+        task = await task_service.task_repo.get_task_by_id(db, task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+
+        clips = await task_service.clip_repo.get_clips_by_task(db, task_id)
+        clip = next((c for c in clips if c["id"] == clip_id), None)
+        if not clip:
+            raise HTTPException(status_code=404, detail="Clip not found")
+
+        words = clip.get("words", [])
+        if not words:
+            raise HTTPException(status_code=400, detail="No word-level timing data for this clip")
+
+        template = template_override or clip.get("pycaps_template") or "word-focus"
+
+        # Merge subtitle_style: task baseline + clip overrides
+        task_metadata = task.get("metadata") or {}
+        task_subtitle_style = task_metadata.get("subtitle_style", {})
+        clip_subtitle_style = (clip.get("metadata") or {}).get("subtitle_style", {})
+        merged_subtitle_style = {**task_subtitle_style, **clip_subtitle_style}
+        if font_size_param is not None:
+            try:
+                merged_subtitle_style["font_size"] = max(8, int(font_size_param))
+            except ValueError:
+                pass
+
+        from ...ass_generator import generate_ass_content, AVAILABLE_TEMPLATES, DEFAULT_TEMPLATE
+        if template not in AVAILABLE_TEMPLATES:
+            template = DEFAULT_TEMPLATE
+
+        ass_content = generate_ass_content(
+            words=words,
+            subtitle_style=merged_subtitle_style or None,
+            template=template,
+            time_offset_ms=time_offset_ms,
+        )
+
+        return {
+            "clip_id": clip_id,
+            "task_id": task_id,
+            "template": template,
+            "ass_content": ass_content,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating ASS for clip {clip_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error generating ASS: {str(e)}")
+
+
 @router.delete("/{task_id}/clips/{clip_id}")
 async def delete_clip(task_id: str, clip_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Delete a specific clip."""
@@ -567,62 +651,49 @@ async def render_clip(
         if merged_subtitle_style:
             caption_options["subtitle_style"] = merged_subtitle_style
 
-        from ...pycaps_renderer import AVAILABLE_TEMPLATES, render_pycaps_subtitles
-        if template not in AVAILABLE_TEMPLATES:
-            raise HTTPException(status_code=400, detail=f"Unknown template: {template}")
+        from ...ass_generator import generate_ass_content, AVAILABLE_TEMPLATES as ASS_TEMPLATES, DEFAULT_TEMPLATE as ASS_DEFAULT
+        if template not in ASS_TEMPLATES:
+            template = ASS_DEFAULT
 
-        # Build pycaps transcript from stored word-level data
+        # Build ASS subtitle content from stored word-level data
         words = clip_data.get("words", [])
         if not words:
             raise HTTPException(status_code=400, detail="No word-level timing data for this clip")
 
-        # Convert word timings from milliseconds to seconds for pycaps
-        # Words are stored in milliseconds in the database, but pycaps expects seconds
-        pycaps_words = [
-            {
-                "text": word["text"],
-                "start": round(word["start"] / 1000.0, 3),
-                "end": round(word["end"] / 1000.0, 3),
-            }
-            for word in words
-        ]
-
-        # For RTL text, reverse word order so highlighting progresses right-to-left
-        from ...pycaps_renderer import _is_rtl_text
-        has_rtl_option = caption_options.get("rtl", False)
-        has_rtl_text = has_rtl_option or any(_is_rtl_text(w["text"]) for w in pycaps_words)
-        if has_rtl_text:
-            pycaps_words = list(reversed(pycaps_words))
-
-        pycaps_transcript = {"segments": [{"words": pycaps_words}]}
+        ass_content = generate_ass_content(
+            words=words,
+            subtitle_style=merged_subtitle_style or None,
+            template=template,
+        )
 
         # Crop clip to target aspect ratio if specified
         input_for_rendering = raw_clip_path
         if target_ratio:
             cropped_filename = f"cropped_{clip_id}_{aspect_ratio.replace(':', '')}.mp4"
             cropped_path = Path(config.temp_dir) / "clips" / cropped_filename
-            
+
             from ...utils.async_helpers import run_in_thread
             from ...video_utils import crop_clip_to_ratio
-            
+
             clip_duration = clip_data.get("duration", 0)
             crop_success = await run_in_thread(
                 crop_clip_to_ratio, raw_clip_path, cropped_path, target_ratio, 0, clip_duration
             )
-            
+
             if not crop_success:
                 raise HTTPException(status_code=500, detail="Failed to crop clip to target aspect ratio")
-            
+
             input_for_rendering = cropped_path
             rendered_filename = f"rendered_{clip_id}_{template}_{aspect_ratio.replace(':', '')}.mp4"
         else:
             rendered_filename = f"rendered_{clip_id}_{template}.mp4"
         rendered_path = Path(config.temp_dir) / "clips" / rendered_filename
 
-        # Run pycaps rendering in a thread
+        # Burn ASS subtitles with ffmpeg (same ASS file as the browser preview)
         from ...utils.async_helpers import run_in_thread
+        from ...ass_renderer import burn_ass_subtitles
         success = await run_in_thread(
-            render_pycaps_subtitles, input_for_rendering, rendered_path, pycaps_transcript, template, caption_options
+            burn_ass_subtitles, input_for_rendering, rendered_path, ass_content
         )
 
         if not success:
@@ -640,7 +711,7 @@ async def render_clip(
         return {
             "message": "Clip rendered successfully",
             "clip_id": clip_id,
-            "pycaps_template": template,
+            "template": template,
             "rendered_url": f"/clips/{rendered_filename}",
         }
 

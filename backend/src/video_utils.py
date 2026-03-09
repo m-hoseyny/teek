@@ -701,11 +701,17 @@ def get_video_transcript(
             )
 
         cache_transcript_data(video_path, transcript_data)
-        formatted_transcript = build_formatted_transcript_from_words(transcript_data["words"])
-        formatted_lines = [line for line in formatted_transcript.splitlines() if line.strip()]
+        if provider == "srt":
+            # Use original SRT lines directly — preserves segment boundaries,
+            # speaker turns, and accurate timings from the uploaded file.
+            result = transcript_data["text"]
+            formatted_lines = [line for line in result.splitlines() if line.strip()]
+        else:
+            formatted_transcript = build_formatted_transcript_from_words(transcript_data["words"])
+            formatted_lines = [line for line in formatted_transcript.splitlines() if line.strip()]
+            result = "\n".join(formatted_lines)
         cache_formatted_transcript(video_path, formatted_lines)
 
-        result = "\n".join(formatted_lines)
         logger.info(
             f"Transcript formatted: {len(formatted_lines)} segments, "
             f"{len(transcript_data['words'])} words, {len(result)} chars"
@@ -787,52 +793,96 @@ def load_cached_transcript_data(video_path: Path) -> Optional[Dict]:
         return None
 
 def build_formatted_transcript_from_words(words: List[Dict[str, Any]]) -> str:
-    """Build AI-analysis transcript text from cached word-level timings."""
+    """Build AI-analysis transcript text from word-level timings.
+
+    Segments are determined by a priority hierarchy:
+      1. Timing gap >= GAP_MS between consecutive words  →  always split
+         (captures speaker turns, breath pauses, scene cuts)
+      2. Sentence-ending punctuation (. ! ?)             →  always split
+      3. Segment duration >= MAX_DURATION_MS             →  force split,
+         preferring a recent clause boundary (, ; :) if one exists within
+         the last LOOKBACK words, otherwise cut at current word
+      4. Word count >= MAX_WORDS                         →  same as (3)
+      5. Clause punctuation (, ; :) with >= MIN_CLAUSE_WORDS →  soft split
+
+    This preserves natural speech rhythm and speaker boundaries rather than
+    imposing arbitrary word-count groupings.
+    """
     if not words:
         return ""
 
-    formatted_lines = []
-    current_segment: List[str] = []
-    current_start: Optional[int] = None
-    segment_word_count = 0
-    max_words_per_segment = 8
+    GAP_MS = 300            # pause long enough to mark a boundary
+    MAX_DURATION_MS = 2000  # force split if segment exceeds this
+    MAX_WORDS = 20          # hard cap on words per segment
+    MIN_CLAUSE_WORDS = 5    # min words before a clause boundary triggers soft split
+    LOOKBACK = 4            # how far back to search for a clause boundary on force split
 
-    for word in words:
-        word_text = str(word.get('text', '')).strip()
-        if not word_text:
-            continue
+    # Normalise input
+    cleaned: List[Dict[str, Any]] = []
+    for w in words:
+        text = str(w.get('text', '')).strip()
+        start = w.get('start')
+        end = w.get('end')
+        if text and start is not None and end is not None:
+            cleaned.append({'text': text, 'start': int(start), 'end': int(end)})
 
-        word_start = word.get('start')
-        word_end = word.get('end')
-        if word_start is None or word_end is None:
-            continue
+    if not cleaned:
+        return ""
 
-        if current_start is None:
-            current_start = int(word_start)
+    formatted_lines: List[str] = []
 
-        current_segment.append(word_text)
-        segment_word_count += 1
+    # We accumulate a "chunk" of word dicts, then emit it via flush().
+    chunk: List[Dict[str, Any]] = []
 
-        if (
-            segment_word_count >= max_words_per_segment
-            or word_text.endswith('.')
-            or word_text.endswith('!')
-            or word_text.endswith('?')
-        ):
-            start_time = format_ms_to_timestamp(current_start)
-            end_time = format_ms_to_timestamp(int(word_end))
-            text = ' '.join(current_segment)
-            formatted_lines.append(f"[{start_time} - {end_time}] {text}")
-            current_segment = []
-            current_start = None
-            segment_word_count = 0
+    def flush(upto: int) -> None:
+        """Emit chunk[:upto+1] as a formatted line, keep the rest."""
+        nonlocal chunk
+        subset = chunk[:upto + 1]
+        remainder = chunk[upto + 1:]
+        if subset:
+            s = format_ms_to_timestamp(subset[0]['start'])
+            e = format_ms_to_timestamp(subset[-1]['end'])
+            formatted_lines.append(f"[{s} - {e}] {' '.join(w['text'] for w in subset)}")
+        chunk = remainder
 
-    if current_segment and current_start is not None:
-        last_word_end = int(words[-1].get('end') or current_start)
-        start_time = format_ms_to_timestamp(current_start)
-        end_time = format_ms_to_timestamp(last_word_end)
-        text = ' '.join(current_segment)
-        formatted_lines.append(f"[{start_time} - {end_time}] {text}")
+    for i, word in enumerate(cleaned):
+        prev_end = cleaned[i - 1]['end'] if i > 0 else word['start']
+        gap = word['start'] - prev_end
+
+        # --- decide whether to flush before adding this word ---
+        if chunk:
+            seg_duration = word['start'] - chunk[0]['start']
+            last_text = chunk[-1]['text']
+            n = len(chunk)
+
+            # Priority 1: timing gap
+            if gap >= GAP_MS:
+                flush(n - 1)
+
+            # Priority 2: sentence-ending punctuation on the last word
+            elif last_text[-1] in '.!?،;':
+                flush(n - 1)
+
+            # Priorities 3 & 4: forced split on duration or word count
+            elif seg_duration >= MAX_DURATION_MS or n >= MAX_WORDS:
+                # Try to find a recent clause boundary to split cleanly
+                split_at = n - 1  # default: cut at current boundary
+                for back in range(1, min(LOOKBACK, n) + 1):
+                    candidate = chunk[n - back]['text']
+                    if candidate[-1] in ',;:':
+                        split_at = n - back
+                        break
+                flush(split_at)
+
+            # Priority 5: soft split at clause punctuation
+            elif n >= MIN_CLAUSE_WORDS and last_text[-1] in ',;:':
+                flush(n - 1)
+
+        chunk.append(word)
+
+    # Flush any remaining words
+    if chunk:
+        flush(len(chunk) - 1)
 
     return '\n'.join(formatted_lines)
 
@@ -1535,7 +1585,10 @@ def create_optimized_clip(
         # Check if we should use PyCaps for animated subtitles
         if use_pycaps and pycaps_template:
             try:
-                from .pycaps_renderer import build_pycaps_transcript, render_pycaps_subtitles
+                from .ass_generator import generate_ass_content, AVAILABLE_TEMPLATES as ASS_TEMPLATES, DEFAULT_TEMPLATE as ASS_DEFAULT
+                from .ass_renderer import burn_ass_subtitles
+
+                effective_template = pycaps_template if pycaps_template in ASS_TEMPLATES else ASS_DEFAULT
 
                 # First, create the clip without subtitles
                 temp_output = output_path.with_suffix('.temp.mp4')
@@ -1573,25 +1626,40 @@ def create_optimized_clip(
                     **encoding_settings
                 )
 
-                # Cleanup
+                # Cleanup MoviePy objects
                 cropped_clip.close()
                 clip.close()
                 video.close()
 
-                # Load word-level transcript from the original video and build pycaps format
+                # Load word-level transcript and build clip-relative words (ms)
                 transcript_data = load_cached_transcript_data(video_path)
-                words = transcript_data.get("words", []) if transcript_data else []
+                all_words = transcript_data.get("words", []) if transcript_data else []
                 clip_start_ms = int(start_time * 1000)
                 clip_end_ms = int(end_time * 1000)
-                pycaps_transcript = build_pycaps_transcript(words, clip_start_ms, clip_end_ms)
+                clip_words = [
+                    {
+                        "text": w["text"],
+                        "start": max(0, w["start"] - clip_start_ms),
+                        "end": min(clip_end_ms - clip_start_ms, w["end"] - clip_start_ms),
+                    }
+                    for w in all_words
+                    if w["start"] < clip_end_ms and w["end"] > clip_start_ms
+                ]
 
-                # Apply PyCaps subtitles onto the cropped clip
-                success = render_pycaps_subtitles(
-                    clip_path=temp_output,
+                # Extract subtitle_style from caption_options if provided
+                ass_subtitle_style = (caption_options or {}).get("subtitle_style") if caption_options else None
+
+                ass_content = generate_ass_content(
+                    words=clip_words,
+                    subtitle_style=ass_subtitle_style,
+                    template=effective_template,
+                )
+
+                # Burn ASS subtitles via ffmpeg
+                success = burn_ass_subtitles(
+                    input_path=temp_output,
                     output_path=output_path,
-                    transcript=pycaps_transcript,
-                    template=pycaps_template,
-                    caption_options=caption_options,
+                    ass_content=ass_content,
                 )
 
                 # Clean up temp file
@@ -1599,16 +1667,14 @@ def create_optimized_clip(
                     temp_output.unlink()
 
                 if success:
-                    logger.info(f"Successfully created clip with PyCaps: {output_path}")
+                    logger.info(f"Successfully created clip with ASS subtitles: {output_path}")
                     return True
                 else:
-                    logger.warning(f"PyCaps rendering failed, falling back to standard subtitles")
+                    logger.warning(f"ASS subtitle burn failed, falling back to standard subtitles")
                     # Fall through to standard subtitle rendering
 
-            except ImportError:
-                logger.warning("PyCaps not available, using standard subtitles")
             except Exception as e:
-                logger.warning(f"PyCaps rendering error: {e}, falling back to standard subtitles")
+                logger.warning(f"ASS rendering error: {e}, falling back to standard subtitles")
 
         # Standard subtitle rendering (fallback or when PyCaps not enabled)
         # Load and process video

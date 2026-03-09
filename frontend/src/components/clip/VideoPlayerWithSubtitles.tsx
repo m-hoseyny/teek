@@ -2,110 +2,80 @@
 
 import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import DynamicVideoPlayer, { type VideoPlayerRef } from "@/components/dynamic-video-player";
-import { SubtitlePreview } from "./SubtitlePreview";
-
-interface Word {
-  text: string;
-  start: number; // milliseconds
-  end: number; // milliseconds
-}
+import { AssSubtitleRenderer } from "./AssSubtitleRenderer";
 
 interface VideoPlayerWithSubtitlesProps {
   src: string;
-  words?: Word[];
-  template?: string;
+  /** ASS subtitle content from the backend /ass endpoint. */
+  assContent?: string | null;
   showSubtitles?: boolean;
   className?: string;
   poster?: string;
-  /** Clip start in the source video (seconds), used to convert absolute time to clip-relative */
-  clipStartSeconds?: number;
 }
 
 export interface VideoPlayerWithSubtitlesRef extends VideoPlayerRef {
   setShowSubtitles: (show: boolean) => void;
-  setTemplate: (template: string) => void;
 }
 
 /**
- * Video player component with synchronized subtitle overlay
+ * Video player with jassub-powered ASS subtitle overlay.
+ *
+ * The subtitle rendering is driven by the same .ass content that ffmpeg
+ * uses when burning subtitles, so preview and export are pixel-identical.
  */
-export const VideoPlayerWithSubtitles = forwardRef<VideoPlayerWithSubtitlesRef, VideoPlayerWithSubtitlesProps>(
-  function VideoPlayerWithSubtitles(
-    {
-      src,
-      words = [],
-      template = "word-focus",
-      showSubtitles = false,
-      className = "",
-      poster,
-      clipStartSeconds = 0,
-    },
-    ref
-  ) {
-    const playerRef = useRef<VideoPlayerRef | null>(null);
-    const [currentTime, setCurrentTime] = useState(0);
-    const [internalShowSubtitles, setInternalShowSubtitles] = useState(showSubtitles);
-    const [internalTemplate, setInternalTemplate] = useState(template);
-    const animationFrameRef = useRef<number>();
+export const VideoPlayerWithSubtitles = forwardRef<
+  VideoPlayerWithSubtitlesRef,
+  VideoPlayerWithSubtitlesProps
+>(function VideoPlayerWithSubtitles(
+  { src, assContent = null, showSubtitles = false, className = "", poster },
+  ref
+) {
+  const playerRef = useRef<VideoPlayerRef | null>(null);
+  const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
+  const [internalShowSubtitles, setInternalShowSubtitles] = useState(showSubtitles);
 
-    // Expose methods to parent via ref
-    useImperativeHandle(ref, () => ({
-      play: () => playerRef.current?.play(),
-      pause: () => playerRef.current?.pause(),
-      seekTo: (time: number) => playerRef.current?.seekTo(time),
-      getCurrentTime: () => playerRef.current?.getCurrentTime() ?? 0,
-      getDuration: () => playerRef.current?.getDuration() ?? 0,
-      setShowSubtitles: (show: boolean) => setInternalShowSubtitles(show),
-      setTemplate: (newTemplate: string) => setInternalTemplate(newTemplate),
-    }));
+  useImperativeHandle(ref, () => ({
+    play: () => playerRef.current?.play(),
+    pause: () => playerRef.current?.pause(),
+    seekTo: (time: number) => playerRef.current?.seekTo(time),
+    getCurrentTime: () => playerRef.current?.getCurrentTime() ?? 0,
+    getDuration: () => playerRef.current?.getDuration() ?? 0,
+    getVideoElement: () => playerRef.current?.getVideoElement() ?? null,
+    setShowSubtitles: (show: boolean) => setInternalShowSubtitles(show),
+  }));
 
-    // Sync currentTime with video playback using requestAnimationFrame for smooth subtitle updates
-    useEffect(() => {
-      const updateTime = () => {
-        if (playerRef.current) {
-          const time = playerRef.current.getCurrentTime() ?? 0;
-          setCurrentTime(time);
-        }
-        animationFrameRef.current = requestAnimationFrame(updateTime);
-      };
+  // Sync internal state when the prop changes
+  useEffect(() => {
+    setInternalShowSubtitles(showSubtitles);
+  }, [showSubtitles]);
 
-      animationFrameRef.current = requestAnimationFrame(updateTime);
+  // Obtain the raw <video> element once the player ref is ready.
+  // We poll briefly because the ref is populated after the first render.
+  useEffect(() => {
+    const id = setInterval(() => {
+      const el = playerRef.current?.getVideoElement() ?? null;
+      if (el) {
+        setVideoElement(el);
+        clearInterval(id);
+      }
+    }, 100);
+    return () => clearInterval(id);
+  }, []);
 
-      return () => {
-        if (animationFrameRef.current) {
-          cancelAnimationFrame(animationFrameRef.current);
-        }
-      };
-    }, []);
+  return (
+    <div className={`relative ${className}`}>
+      <DynamicVideoPlayer
+        ref={playerRef}
+        src={src}
+        poster={poster}
+        className="w-full"
+      />
 
-    // Update internal state when props change
-    useEffect(() => {
-      setInternalShowSubtitles(showSubtitles);
-    }, [showSubtitles]);
-
-    useEffect(() => {
-      setInternalTemplate(template);
-    }, [template]);
-
-    return (
-      <div className={`relative ${className}`}>
-        <DynamicVideoPlayer
-          ref={playerRef}
-          src={src}
-          poster={poster}
-          className="w-full"
-        />
-
-        {/* Subtitle overlay */}
-        {internalShowSubtitles && words.length > 0 && (
-          <SubtitlePreview
-            words={words}
-            currentTime={currentTime}
-            clipStartSeconds={clipStartSeconds}
-            template={internalTemplate}
-          />
-        )}
-      </div>
-    );
-  }
-);
+      <AssSubtitleRenderer
+        videoElement={videoElement}
+        assContent={assContent}
+        enabled={internalShowSubtitles}
+      />
+    </div>
+  );
+});

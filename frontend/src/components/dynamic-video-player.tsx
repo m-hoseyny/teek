@@ -6,6 +6,7 @@ export interface VideoPlayerRef {
   pause: () => void;
   getCurrentTime: () => number;
   getDuration: () => number;
+  getVideoElement: () => HTMLVideoElement | null;
 }
 
 interface DynamicVideoPlayerProps {
@@ -47,6 +48,7 @@ const DynamicVideoPlayer = forwardRef<VideoPlayerRef, DynamicVideoPlayerProps>((
     },
     getCurrentTime: () => videoRef.current?.currentTime ?? 0,
     getDuration: () => videoRef.current?.duration ?? 0,
+    getVideoElement: () => videoRef.current,
   }));
 
   const handleLoadedMetadata = () => {
