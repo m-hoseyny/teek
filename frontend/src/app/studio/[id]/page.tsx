@@ -7,7 +7,7 @@ import { useSession } from "@/lib/auth-client";
 import { VideoPlayer } from "@/components/clip/VideoPlayer";
 import {
   Download, Share2, Edit, Trash2, Sparkles,
-  Clock, Brain, TrendingUp, ChevronRight, Loader2, Clapperboard,
+  Clock, Brain, TrendingUp, ChevronRight, Loader2, Clapperboard, RotateCcw,
 } from "lucide-react";
 
 interface Clip {
@@ -70,6 +70,23 @@ export default function StudioPage() {
     progress: 0, message: "Generating clips…", clipsCompleted: 0, clipsTotal: 0,
   });
   const [videoObjectUrl, setVideoObjectUrl] = useState<string | null>(null);
+
+  const [isReopening, setIsReopening] = useState(false);
+
+  const handleReopen = async () => {
+    if (!session?.user?.id) return;
+    setIsReopening(true);
+    try {
+      await fetch(`${apiUrl}/tasks/${taskId}/reopen`, {
+        method: "POST",
+        headers: { user_id: session.user.id },
+      });
+      router.push(`/review/${taskId}`);
+    } catch (e) {
+      console.error("Failed to reopen task:", e);
+      setIsReopening(false);
+    }
+  };
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -285,12 +302,22 @@ export default function StudioPage() {
       <div className="max-w-[1600px] mx-auto space-y-4">
 
         {/* ── Page Header ── */}
-        <div className="flex items-center gap-3">
-          <Clapperboard className="w-5 h-5 text-primary flex-shrink-0" />
-          <div className="min-w-0">
-            <h1 className="text-xl md:text-2xl font-bold text-white leading-tight">Viral Clips Studio</h1>
-            <p className="text-gray-400 text-sm truncate">{task.source?.title || "Generated Clips"}</p>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <Clapperboard className="w-5 h-5 text-primary flex-shrink-0" />
+            <div className="min-w-0">
+              <h1 className="text-xl md:text-2xl font-bold text-white leading-tight">Viral Clips Studio</h1>
+              <p className="text-gray-400 text-sm truncate">{task.source?.title || "Generated Clips"}</p>
+            </div>
           </div>
+          <button
+            onClick={handleReopen}
+            disabled={isReopening}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-muted hover:bg-muted/80 text-white text-sm font-medium transition-all flex-shrink-0 disabled:opacity-50"
+          >
+            {isReopening ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+            Reopen
+          </button>
         </div>
 
         {/* ── Generation Progress Banner ── */}
