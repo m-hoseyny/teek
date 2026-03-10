@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import Link from "next/link";
-import { Play, Download, Share2, ChevronDown, ChevronRight, Search, Clapperboard } from "lucide-react";
+import { Play, Download, Share2, ChevronDown, ChevronRight, Search, Clapperboard, Eye, Loader2, AlertCircle } from "lucide-react";
 import { ClipModal } from "@/components/clip/ClipModal";
 import { useJwt } from "@/contexts/jwt-context";
 
@@ -22,12 +22,43 @@ interface Clip {
   filename: string;
 }
 
+type TaskStatus = "completed" | "processing" | "awaiting_review" | "transcribed" | "error" | "queued" | "pending";
+
+const STATUS_STYLES: Record<string, string> = {
+  completed: "bg-green-400/20 text-green-400",
+  processing: "bg-yellow-400/20 text-yellow-400",
+  awaiting_review: "bg-blue-400/20 text-blue-400",
+  transcribed: "bg-cyan-400/20 text-cyan-400",
+  error: "bg-red-400/20 text-red-400",
+  queued: "bg-gray-400/20 text-gray-400",
+  pending: "bg-gray-400/20 text-gray-400",
+};
+
+function StatusBadge({ status, className = "" }: { status: TaskStatus; className?: string }) {
+  return (
+    <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${STATUS_STYLES[status] ?? "bg-gray-400/20 text-gray-400"} ${className}`}>
+      {STATUS_LABELS[status] ?? status}
+    </span>
+  );
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  all: "All",
+  completed: "Completed",
+  processing: "Processing",
+  awaiting_review: "Awaiting Review",
+  transcribed: "Transcribed",
+  error: "Failed",
+  queued: "Queued",
+  pending: "Pending",
+};
+
 interface Project {
   id: string;
   title: string;
   sourceTitle: string;
   createdAt: string;
-  status: "completed" | "processing" | "failed";
+  status: TaskStatus;
   clipsCount: number;
   avgVirality: number;
   clips: Clip[];
@@ -43,7 +74,7 @@ export default function LibraryPage() {
   const [selectedClip, setSelectedClip] = useState<Clip | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [filterStatus, setFilterStatus] = useState<"all" | "completed" | "processing">("all");
+  const [filterStatus, setFilterStatus] = useState<"all" | TaskStatus>("all");
   const [searchQuery, setSearchQuery] = useState("");
 
   // Fetch projects (tasks) from API - WITHOUT clips initially
@@ -81,7 +112,7 @@ export default function LibraryPage() {
           title: task.source?.title || task.source?.url?.split("/").pop() || `Project ${task.id.slice(0, 8)}`,
           sourceTitle: task.source?.title || task.source?.url || "Unknown Source",
           createdAt: new Date(task.created_at).toLocaleDateString(),
-          status: task.status === "completed" ? "completed" : task.status === "processing" ? "processing" : "failed",
+          status: (["completed", "processing", "awaiting_review", "transcribed", "error", "queued", "pending"].includes(task.status) ? task.status : "error") as TaskStatus,
           clipsCount: 0, // Will be updated when clips are fetched
           avgVirality: 0, // Will be updated when clips are fetched
           clips: [], // Empty initially, will be fetched on expand
@@ -240,17 +271,17 @@ export default function LibraryPage() {
 
           {/* Filter Buttons */}
           <div className="flex items-center gap-2 flex-shrink-0">
-            {(["all", "completed", "processing"] as const).map((status) => (
+            {(["all", "completed", "awaiting_review", "processing", "error"] as const).map((status) => (
               <button
                 key={status}
                 onClick={() => setFilterStatus(status)}
-                className={`px-3 md:px-4 py-2 rounded-lg text-xs md:text-sm font-medium transition-all capitalize ${
+                className={`px-3 md:px-4 py-2 rounded-lg text-xs md:text-sm font-medium transition-all ${
                   filterStatus === status
                     ? "bg-primary text-white"
                     : "bg-card text-gray-400 hover:text-white"
                 }`}
               >
-                {status === "all" ? "All" : status.charAt(0).toUpperCase() + status.slice(1)}
+                {STATUS_LABELS[status] ?? "All"}
               </button>
             ))}
           </div>
@@ -292,23 +323,9 @@ export default function LibraryPage() {
                     <div className="flex items-start justify-between gap-2 mb-1">
                       <h3 className="text-base md:text-lg font-semibold text-white truncate">{project.title}</h3>
 
-                      {/* Status Badge + Studio Link — right-aligned, no wrap */}
+                      {/* Status Badge + Action Link — right-aligned, no wrap */}
                       <div className="flex items-center gap-2 flex-shrink-0">
-                        {project.status === "completed" && (
-                          <span className="hidden sm:inline-flex px-2.5 py-0.5 rounded-full bg-green-400/20 text-green-400 text-xs font-semibold">
-                            Completed
-                          </span>
-                        )}
-                        {project.status === "processing" && (
-                          <span className="hidden sm:inline-flex px-2.5 py-0.5 rounded-full bg-yellow-400/20 text-yellow-400 text-xs font-semibold">
-                            Processing
-                          </span>
-                        )}
-                        {project.status === "failed" && (
-                          <span className="hidden sm:inline-flex px-2.5 py-0.5 rounded-full bg-red-400/20 text-red-400 text-xs font-semibold">
-                            Failed
-                          </span>
-                        )}
+                        <StatusBadge status={project.status} className="hidden sm:inline-flex" />
                         {project.status === "completed" && (
                           <Link
                             href={`/studio/${project.id}`}
@@ -317,6 +334,36 @@ export default function LibraryPage() {
                           >
                             <Clapperboard className="w-3.5 h-3.5" />
                             <span className="hidden sm:inline">Open in Studio</span>
+                          </Link>
+                        )}
+                        {project.status === "awaiting_review" && (
+                          <Link
+                            href={`/review/${project.id}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="flex items-center gap-1 px-2 md:px-3 py-1 md:py-1.5 rounded-lg bg-blue-500/15 hover:bg-blue-500/30 text-blue-400 text-xs font-semibold transition-colors border border-blue-500/20 whitespace-nowrap"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">Review</span>
+                          </Link>
+                        )}
+                        {(project.status === "processing" || project.status === "transcribed" || project.status === "queued" || project.status === "pending") && (
+                          <Link
+                            href={`/processing/${project.id}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="flex items-center gap-1 px-2 md:px-3 py-1 md:py-1.5 rounded-lg bg-yellow-500/15 hover:bg-yellow-500/30 text-yellow-400 text-xs font-semibold transition-colors border border-yellow-500/20 whitespace-nowrap"
+                          >
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span className="hidden sm:inline">View Progress</span>
+                          </Link>
+                        )}
+                        {project.status === "error" && (
+                          <Link
+                            href={`/processing/${project.id}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="flex items-center gap-1 px-2 md:px-3 py-1 md:py-1.5 rounded-lg bg-red-500/15 hover:bg-red-500/30 text-red-400 text-xs font-semibold transition-colors border border-red-500/20 whitespace-nowrap"
+                          >
+                            <AlertCircle className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">View Error</span>
                           </Link>
                         )}
                       </div>
@@ -343,23 +390,41 @@ export default function LibraryPage() {
                         </>
                       )}
                       {/* Status badge inline on mobile only */}
-                      <span className="sm:hidden">
-                        {project.status === "completed" && (
-                          <span className="px-2 py-0.5 rounded-full bg-green-400/20 text-green-400 text-xs font-semibold">Completed</span>
-                        )}
-                        {project.status === "processing" && (
-                          <span className="px-2 py-0.5 rounded-full bg-yellow-400/20 text-yellow-400 text-xs font-semibold">Processing</span>
-                        )}
-                        {project.status === "failed" && (
-                          <span className="px-2 py-0.5 rounded-full bg-red-400/20 text-red-400 text-xs font-semibold">Failed</span>
-                        )}
-                      </span>
+                      <StatusBadge status={project.status} className="sm:hidden" />
                     </div>
                   </div>
                 </button>
 
+                {/* Awaiting Review — locked skeleton clips */}
+                {expandedProjects.has(project.id) && project.status === "awaiting_review" && (
+                  <div className="p-4 md:p-6 pt-0 border-t border-border">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      {Array.from({ length: 4 }).map((_, i) => (
+                        <div key={i} className="rounded-xl overflow-hidden border border-border opacity-50 pointer-events-none select-none">
+                          <div className="relative aspect-[9/16] bg-muted animate-pulse">
+                            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+                              <Loader2 className="w-8 h-8 text-muted-foreground animate-spin" />
+                              <span className="text-xs text-muted-foreground">Pending review</span>
+                            </div>
+                          </div>
+                          <div className="p-3 space-y-2">
+                            <div className="h-3 bg-muted rounded animate-pulse w-3/4" />
+                            <div className="h-3 bg-muted rounded animate-pulse w-1/2" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-center text-xs text-muted-foreground mt-4">
+                      Clips will be available after review.{" "}
+                      <Link href={`/review/${project.id}`} className="text-blue-400 hover:underline">
+                        Go to Review
+                      </Link>
+                    </p>
+                  </div>
+                )}
+
                 {/* Clips Grid (Expanded) */}
-                {expandedProjects.has(project.id) && project.clips.length > 0 && (
+                {expandedProjects.has(project.id) && project.status !== "awaiting_review" && project.clips.length > 0 && (
                   <div className="p-4 md:p-6 pt-0 border-t border-border">
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                       {project.clips.map((clip) => (
@@ -432,10 +497,12 @@ export default function LibraryPage() {
                 )}
 
                 {/* No Clips Message */}
-                {expandedProjects.has(project.id) && project.clips.length === 0 && (
+                {expandedProjects.has(project.id) && project.status !== "awaiting_review" && project.clips.length === 0 && (
                   <div className="p-6 pt-0 text-center text-muted-foreground border-t border-border">
                     {project.status === "processing"
                       ? "Clips are being generated..."
+                      : project.status === "awaiting_review"
+                      ? "Review is pending — open the task to edit and generate clips."
                       : "No clips available for this project"}
                   </div>
                 )}
