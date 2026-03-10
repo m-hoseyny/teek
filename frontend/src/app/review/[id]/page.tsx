@@ -121,7 +121,7 @@ export default function ReviewPage() {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [videoSrc, setVideoSrc] = useState<string | null>(null);
+  const videoSrc = taskId ? `${apiUrl}/tasks/${taskId}/source-video` : null;
   const [transitionsEnabled, setTransitionsEnabled] = useState(false);
   const [aspectRatio, setAspectRatio] = useState<"9:16" | "1:1" | "16:9">("9:16");
   const [savingClipId, setSavingClipId] = useState<string | null>(null);
@@ -163,14 +163,6 @@ export default function ReviewPage() {
       }
     };
 
-    const fetchVideo = async () => {
-      const res = await apiFetch(`${apiUrl}/tasks/${taskId}/source-video`);
-      if (res.ok) {
-        const blob = await res.blob();
-        setVideoSrc(URL.createObjectURL(blob));
-      }
-    };
-
     const fetchClips = async () => {
       const res = await apiFetch(`${apiUrl}/tasks/${taskId}/clips`);
       if (res.ok) {
@@ -196,7 +188,6 @@ export default function ReviewPage() {
     fetchTask();
     fetchSegments();
     fetchAss(selectedStyle);
-    fetchVideo();
     fetchClips();
     fetchSubtitleDefaults();
   }, [taskId, jwt, apiUrl, apiFetch]);

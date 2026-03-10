@@ -696,61 +696,66 @@ async def delete_task(task_id: str, request: Request, db: AsyncSession = Depends
 
 @router.get("/{task_id}/source-video")
 async def get_task_source_video(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
-    """Serve the source video file for review. Publicly accessible via task_id (UUID)."""
-    try:
-        from pathlib import Path
-        from fastapi.responses import FileResponse
+    """Stream the source video file with HTTP range request support. Publicly accessible via task_id (UUID)."""
+    import re
+    from pathlib import Path
+    from fastapi.responses import StreamingResponse
 
+    try:
         task_service = TaskService(db)
         task = await task_service.task_repo.get_task_by_id(db, task_id)
 
         if not task:
-            logger.error(f"Task {task_id} not found")
             raise HTTPException(status_code=404, detail="Task not found")
 
-        # Get video path from task metadata
         metadata = task.get("metadata") or {}
         video_path = metadata.get("video_path")
 
-        logger.info(f"Task {task_id}: video_path={video_path}")
-
         if not video_path:
-            logger.error(f"No video_path in metadata for task {task_id}")
             raise HTTPException(status_code=404, detail="Video path not found for this task")
 
         video_file = Path(video_path)
 
-        # Check if downloads directory exists and list its contents
-        downloads_dir = Path("/app/downloads")
-        logger.info(f"Downloads dir exists: {downloads_dir.exists()}")
-        if downloads_dir.exists():
-            try:
-                files = list(downloads_dir.iterdir())
-                logger.info(f"Downloads dir contents: {[str(f.name) for f in files[:10]]}")
-            except Exception as e:
-                logger.error(f"Cannot list downloads dir: {e}")
-
-        logger.info(f"Checking video file: {video_file}, exists={video_file.exists()}, is_file={video_file.is_file()}")
-
-        if not video_file.exists():
-            logger.error(f"Video file does not exist: {video_path}")
+        if not video_file.exists() or not video_file.is_file():
             raise HTTPException(status_code=404, detail="Video file not found")
 
-        if not video_file.is_file():
-            logger.error(f"Video path is not a file: {video_path}")
-            raise HTTPException(status_code=404, detail="Video path is not a file")
-
         file_size = video_file.stat().st_size
-        logger.info(f"Serving video file: {video_file}, size={file_size} bytes")
 
-        return FileResponse(
-            path=str(video_file),
-            media_type="video/mp4",
-            headers={
-                "Accept-Ranges": "bytes",
-                "Cache-Control": "public, max-age=3600",
-            }
-        )
+        range_header = request.headers.get("range")
+
+        start = 0
+        end = file_size - 1
+        status_code = 200
+
+        if range_header:
+            match = re.match(r"bytes=(\d+)-(\d*)", range_header)
+            if match:
+                start = int(match.group(1))
+                end = int(match.group(2)) if match.group(2) else file_size - 1
+                end = min(end, file_size - 1)
+                status_code = 206
+
+        chunk_size = 1024 * 1024  # 1 MB
+
+        async def stream():
+            with open(video_file, "rb") as f:
+                f.seek(start)
+                remaining = end - start + 1
+                while remaining > 0:
+                    data = f.read(min(chunk_size, remaining))
+                    if not data:
+                        break
+                    remaining -= len(data)
+                    yield data
+
+        headers = {
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(end - start + 1),
+            "Cache-Control": "public, max-age=3600",
+        }
+
+        return StreamingResponse(stream(), status_code=status_code, headers=headers, media_type="video/mp4")
 
     except HTTPException:
         raise

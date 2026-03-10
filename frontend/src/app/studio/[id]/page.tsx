@@ -188,6 +188,15 @@ export default function StudioPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId, jwt]);
 
+  // Poll when clips have pending video files or when no clips have loaded yet
+  useEffect(() => {
+    if (isProcessing) return; // SSE already handles this
+    const hasPending = clips.length === 0 || clips.some((c) => !c.filename);
+    if (!hasPending) return;
+    const interval = setInterval(fetchClips, 3000);
+    return () => clearInterval(interval);
+  }, [clips, isProcessing, fetchClips]);
+
   // Fetch selected clip video as a blob to avoid static-file URL issues
   useEffect(() => {
     if (!selectedClip?.filename) {
