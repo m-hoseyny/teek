@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useSession } from "@/lib/auth-client";
+import { useJwt } from "@/contexts/jwt-context";
 import { VideoPlayer } from "@/components/clip/VideoPlayer";
 import {
   Download, Share2, Edit, Trash2, Sparkles,
@@ -58,6 +59,7 @@ export default function StudioPage() {
   const params = useParams();
   const router = useRouter();
   const { data: session } = useSession();
+  const { jwt, apiFetch } = useJwt();
   const taskId = params.id as string;
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -74,12 +76,11 @@ export default function StudioPage() {
   const [isReopening, setIsReopening] = useState(false);
 
   const handleReopen = async () => {
-    if (!session?.user?.id) return;
+    if (!jwt) return;
     setIsReopening(true);
     try {
-      await fetch(`${apiUrl}/tasks/${taskId}/reopen`, {
+      await apiFetch(`${apiUrl}/tasks/${taskId}/reopen`, {
         method: "POST",
-        headers: { user_id: session.user.id },
       });
       router.push(`/review/${taskId}`);
     } catch (e) {
@@ -93,11 +94,9 @@ export default function StudioPage() {
   const connectSSERef = useRef<(() => void) | null>(null);
 
   const fetchClips = useCallback(async () => {
-    if (!session?.user?.id) return;
+    if (!jwt) return;
     try {
-      const res = await fetch(`${apiUrl}/tasks/${taskId}/clips`, {
-        headers: { user_id: session.user.id },
-      });
+      const res = await apiFetch(`${apiUrl}/tasks/${taskId}/clips`);
       if (res.ok) {
         const data = await res.json();
         const fetched: Clip[] = data.clips || [];
@@ -107,15 +106,13 @@ export default function StudioPage() {
     } catch (e) {
       console.error("Failed to fetch clips:", e);
     }
-  }, [apiUrl, taskId, session?.user?.id]);
+  }, [apiUrl, taskId, jwt, apiFetch]);
 
   const connectSSE = useCallback(() => {
-    if (!session?.user?.id) return;
+    if (!jwt) return;
     if (eventSourceRef.current) eventSourceRef.current.close();
 
-    const es = new EventSource(
-      `${apiUrl}/tasks/${taskId}/progress?user_id=${session.user.id}`
-    );
+    const es = new EventSource(`/api/tasks/${taskId}/progress`);
 
     es.addEventListener("progress", (evt: MessageEvent) => {
       try {
@@ -145,9 +142,9 @@ export default function StudioPage() {
       es.close();
       if (pollRef.current) clearInterval(pollRef.current);
       pollRef.current = setInterval(async () => {
-        if (!session?.user?.id) return;
+        if (!jwt) return;
         try {
-          const res = await fetch(`${apiUrl}/tasks/${taskId}`, { headers: { user_id: session.user.id } });
+          const res = await apiFetch(`${apiUrl}/tasks/${taskId}`);
           if (res.ok) {
             const data = await res.json();
             if (data.status === "completed") { clearInterval(pollRef.current!); setIsProcessing(false); fetchClips(); }
@@ -157,17 +154,17 @@ export default function StudioPage() {
     };
 
     eventSourceRef.current = es;
-  }, [apiUrl, taskId, session?.user?.id, fetchClips]);
+  }, [apiUrl, taskId, jwt, apiFetch, fetchClips]);
 
   useEffect(() => { connectSSERef.current = connectSSE; }, [connectSSE]);
 
   useEffect(() => {
-    if (!session?.user?.id || !taskId) return;
+    if (!jwt || !taskId) return;
     const init = async () => {
       try {
         const [taskRes, clipsRes] = await Promise.all([
-          fetch(`${apiUrl}/tasks/${taskId}`, { headers: { user_id: session.user.id } }),
-          fetch(`${apiUrl}/tasks/${taskId}/clips`, { headers: { user_id: session.user.id } }),
+          apiFetch(`${apiUrl}/tasks/${taskId}`),
+          apiFetch(`${apiUrl}/tasks/${taskId}/clips`),
         ]);
         if (taskRes.ok) {
           const taskData = await taskRes.json();
@@ -189,7 +186,7 @@ export default function StudioPage() {
     init();
     return () => { eventSourceRef.current?.close(); if (pollRef.current) clearInterval(pollRef.current); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskId, session?.user?.id]);
+  }, [taskId, jwt]);
 
   // Fetch selected clip video as a blob to avoid static-file URL issues
   useEffect(() => {
@@ -204,9 +201,7 @@ export default function StudioPage() {
     const fetchVideo = async () => {
       setVideoObjectUrl(null);
       try {
-        const headers: Record<string, string> = {};
-        if (session?.user?.id) headers["user_id"] = session.user.id;
-        const res = await fetch(`${apiUrl}/clips/${selectedClip.filename}`, { headers });
+        const res = await apiFetch(`${apiUrl}/clips/${selectedClip.filename}`);
         if (!cancelled && res.ok) {
           const blob = await res.blob();
           objectUrl = URL.createObjectURL(blob);
@@ -224,15 +219,14 @@ export default function StudioPage() {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       setVideoObjectUrl(null);
     };
-  }, [selectedClip?.filename, apiUrl, session?.user?.id]);
+  }, [selectedClip?.filename, apiUrl, jwt, apiFetch]);
 
   const handleDeleteClip = async (clipId: string) => {
-    if (!session?.user?.id) return;
+    if (!jwt) return;
     if (!confirm("Are you sure you want to delete this clip?")) return;
     try {
-      const res = await fetch(`${apiUrl}/tasks/${taskId}/clips/${clipId}`, {
+      const res = await apiFetch(`${apiUrl}/tasks/${taskId}/clips/${clipId}`, {
         method: "DELETE",
-        headers: { user_id: session.user.id },
       });
       if (res.ok) {
         const remaining = clips.filter((c) => c.id !== clipId);

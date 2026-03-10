@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSession } from "@/lib/auth-client";
+import { useJwt } from "@/contexts/jwt-context";
 import { SettingsSaveStatus } from "./components/settings-save-status";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { SettingsSectionAi } from "./components/settings-section-ai";
@@ -136,6 +137,7 @@ function SettingsPageContent() {
   const latestAiModelsRequestRef = useRef(0);
 
   const { data: session, isPending } = useSession();
+  const { apiFetch, jwt } = useJwt();
   const router = useRouter();
   const searchParams = useSearchParams();
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -201,7 +203,7 @@ function SettingsPageContent() {
   const fetchAiModels = useCallback(
     async (provider: AiProvider, options?: { showStatus?: boolean }): Promise<boolean> => {
       const showStatus = options?.showStatus ?? true;
-      if (!session?.user?.id) {
+      if (!jwt) {
         return false;
       }
 
@@ -219,11 +221,7 @@ function SettingsPageContent() {
           params.set("routing_mode", zaiRoutingMode);
         }
         const modelsUrl = `${apiUrl}/tasks/ai-settings/${provider}/models${params.toString() ? `?${params.toString()}` : ""}`;
-        const response = await fetch(modelsUrl, {
-          headers: {
-            user_id: session.user.id,
-          },
-        });
+        const response = await apiFetch(modelsUrl);
 
         const responseData = await response
           .json()
@@ -279,19 +277,15 @@ function SettingsPageContent() {
         }
       }
     },
-    [apiUrl, session?.user?.id, zaiRoutingMode],
+    [apiUrl, apiFetch, jwt, zaiRoutingMode],
   );
 
   const refreshAiSettings = useCallback(async (): Promise<void> => {
-    if (!session?.user?.id) {
+    if (!jwt) {
       return;
     }
     try {
-      const response = await fetch(`${apiUrl}/tasks/ai-settings`, {
-        headers: {
-          user_id: session.user.id,
-        },
-      });
+      const response = await apiFetch(`${apiUrl}/tasks/ai-settings`);
       if (!response.ok) {
         return;
       }
@@ -319,11 +313,11 @@ function SettingsPageContent() {
     } catch (loadError) {
       console.error("Failed to load AI settings:", loadError);
     }
-  }, [apiUrl, session?.user?.id]);
+  }, [apiUrl, apiFetch, jwt]);
 
   const savePreferences = useCallback(
     async (options?: SavePreferencesOptions): Promise<boolean> => {
-      if (!session?.user?.id) {
+      if (!jwt) {
         return false;
       }
       if (!isDirty) {
@@ -366,7 +360,7 @@ function SettingsPageContent() {
         setIsSavingPreferences(false);
       }
     },
-    [isDirty, preferencesDraft, session?.user?.id],
+    [isDirty, jwt, preferencesDraft],
   );
 
   const updateSectionQueryParam = useCallback(
@@ -408,11 +402,10 @@ function SettingsPageContent() {
       setAssemblyKeyStatus(null);
 
       try {
-        const response = await fetch(`${apiUrl}/tasks/transcription-settings/assembly-key`, {
+        const response = await apiFetch(`${apiUrl}/tasks/transcription-settings/assembly-key`, {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
-            user_id: session?.user?.id || "",
           },
           body: JSON.stringify({ assembly_api_key: trimmed }),
         });
@@ -434,7 +427,7 @@ function SettingsPageContent() {
         setIsSavingAssemblyKey(false);
       }
     },
-    [apiUrl, session?.user?.id],
+    [apiUrl, apiFetch],
   );
 
   const deleteAssemblyKey = useCallback(async (): Promise<void> => {
@@ -443,11 +436,8 @@ function SettingsPageContent() {
     setAssemblyKeyStatus(null);
 
     try {
-      const response = await fetch(`${apiUrl}/tasks/transcription-settings/assembly-key`, {
+      const response = await apiFetch(`${apiUrl}/tasks/transcription-settings/assembly-key`, {
         method: "DELETE",
-        headers: {
-          user_id: session?.user?.id || "",
-        },
       });
 
       const responseData = await response.json().catch(() => ({} as { detail?: string }));
@@ -464,7 +454,7 @@ function SettingsPageContent() {
     } finally {
       setIsSavingAssemblyKey(false);
     }
-  }, [apiUrl, session?.user?.id]);
+  }, [apiUrl, apiFetch]);
 
   const saveAiProviderKey = useCallback(
     async (provider: AiProvider, key: string): Promise<boolean> => {
@@ -479,11 +469,10 @@ function SettingsPageContent() {
       setAiKeyStatus(null);
 
       try {
-        const response = await fetch(`${apiUrl}/tasks/ai-settings/${provider}/key`, {
+        const response = await apiFetch(`${apiUrl}/tasks/ai-settings/${provider}/key`, {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
-            user_id: session?.user?.id || "",
           },
           body: JSON.stringify({ api_key: trimmed }),
         });
@@ -507,7 +496,7 @@ function SettingsPageContent() {
         setIsSavingAiKey(false);
       }
     },
-    [apiUrl, fetchAiModels, refreshAiSettings, session?.user?.id],
+    [apiUrl, apiFetch, fetchAiModels, refreshAiSettings],
   );
 
   const saveZaiProfileKey = useCallback(
@@ -523,11 +512,10 @@ function SettingsPageContent() {
       setAiKeyStatus(null);
 
       try {
-        const response = await fetch(`${apiUrl}/tasks/ai-settings/zai/profiles/${profile}/key`, {
+        const response = await apiFetch(`${apiUrl}/tasks/ai-settings/zai/profiles/${profile}/key`, {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
-            user_id: session?.user?.id || "",
           },
           body: JSON.stringify({ api_key: trimmed }),
         });
@@ -551,7 +539,7 @@ function SettingsPageContent() {
         setIsSavingAiKey(false);
       }
     },
-    [apiUrl, fetchAiModels, refreshAiSettings, session?.user?.id],
+    [apiUrl, apiFetch, fetchAiModels, refreshAiSettings],
   );
 
   const deleteZaiProfileKey = useCallback(
@@ -560,11 +548,8 @@ function SettingsPageContent() {
       setAiKeyError(null);
       setAiKeyStatus(null);
       try {
-        const response = await fetch(`${apiUrl}/tasks/ai-settings/zai/profiles/${profile}/key`, {
+        const response = await apiFetch(`${apiUrl}/tasks/ai-settings/zai/profiles/${profile}/key`, {
           method: "DELETE",
-          headers: {
-            user_id: session?.user?.id || "",
-          },
         });
         const responseData = await response.json().catch(() => ({} as { detail?: string }));
         if (!response.ok) {
@@ -582,7 +567,7 @@ function SettingsPageContent() {
         setIsSavingAiKey(false);
       }
     },
-    [apiUrl, refreshAiSettings, session?.user?.id],
+    [apiUrl, apiFetch, refreshAiSettings],
   );
 
   const saveZaiRoutingMode = useCallback(
@@ -591,11 +576,10 @@ function SettingsPageContent() {
       setAiKeyError(null);
       setAiKeyStatus(null);
       try {
-        const response = await fetch(`${apiUrl}/tasks/ai-settings/zai/routing-mode`, {
+        const response = await apiFetch(`${apiUrl}/tasks/ai-settings/zai/routing-mode`, {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
-            user_id: session?.user?.id || "",
           },
           body: JSON.stringify({ routing_mode: routingMode }),
         });
@@ -623,7 +607,7 @@ function SettingsPageContent() {
         setIsSavingAiKey(false);
       }
     },
-    [apiUrl, fetchAiModels, preferencesDraft.aiProvider, refreshAiSettings, session?.user?.id],
+    [apiUrl, apiFetch, fetchAiModels, preferencesDraft.aiProvider, refreshAiSettings],
   );
 
   const deleteAiProviderKey = useCallback(
@@ -633,11 +617,8 @@ function SettingsPageContent() {
       setAiKeyStatus(null);
 
       try {
-        const response = await fetch(`${apiUrl}/tasks/ai-settings/${provider}/key`, {
+        const response = await apiFetch(`${apiUrl}/tasks/ai-settings/${provider}/key`, {
           method: "DELETE",
-          headers: {
-            user_id: session?.user?.id || "",
-          },
         });
 
         const responseData = await response.json().catch(() => ({} as { detail?: string }));
@@ -665,7 +646,7 @@ function SettingsPageContent() {
         setIsSavingAiKey(false);
       }
     },
-    [apiUrl, hasEnvAiFallback, preferencesDraft.aiProvider, refreshAiSettings, session?.user?.id],
+    [apiUrl, apiFetch, hasEnvAiFallback, preferencesDraft.aiProvider, refreshAiSettings],
   );
 
   const handleFontUpload = useCallback(
@@ -723,10 +704,10 @@ function SettingsPageContent() {
   }, [loadFonts]);
 
   useEffect(() => {
-    if (!isPending && !session?.user?.id) {
+    if (!isPending && !jwt) {
       setIsFetching(false);
     }
-  }, [isPending, session?.user?.id]);
+  }, [isPending, jwt]);
 
   useEffect(() => {
     const sectionParam = searchParams.get("section");
@@ -736,7 +717,7 @@ function SettingsPageContent() {
   }, [searchParams, updateSectionQueryParam]);
 
   useEffect(() => {
-    if (!session?.user?.id) {
+    if (!jwt) {
       return;
     }
 
@@ -792,24 +773,20 @@ function SettingsPageContent() {
     };
 
     void loadPreferences();
-  }, [session?.user?.id]);
+  }, [jwt]);
 
   useEffect(() => {
     activeAiProviderRef.current = preferencesDraft.aiProvider;
   }, [preferencesDraft.aiProvider]);
 
   useEffect(() => {
-    if (!session?.user?.id) {
+    if (!jwt) {
       return;
     }
 
     const loadTranscriptionSettings = async () => {
       try {
-        const response = await fetch(`${apiUrl}/tasks/transcription-settings`, {
-          headers: {
-            user_id: session.user.id,
-          },
-        });
+        const response = await apiFetch(`${apiUrl}/tasks/transcription-settings`);
         if (!response.ok) {
           return;
         }
@@ -836,17 +813,17 @@ function SettingsPageContent() {
     };
 
     void loadTranscriptionSettings();
-  }, [apiUrl, session?.user?.id]);
+  }, [apiUrl, apiFetch, jwt]);
 
   useEffect(() => {
-    if (!session?.user?.id) {
+    if (!jwt) {
       return;
     }
     void refreshAiSettings();
-  }, [refreshAiSettings, session?.user?.id]);
+  }, [refreshAiSettings, jwt]);
 
   useEffect(() => {
-    if (!session?.user?.id) {
+    if (!jwt) {
       return;
     }
 
@@ -871,7 +848,7 @@ function SettingsPageContent() {
     hasSavedZaiProfileKeys.metered,
     hasSavedZaiProfileKeys.subscription,
     preferencesDraft.aiProvider,
-    session?.user?.id,
+    jwt,
     zaiRoutingMode,
   ]);
 
@@ -904,7 +881,7 @@ function SettingsPageContent() {
     );
   }
 
-  if (!session?.user) {
+  if (!jwt) {
     return (
       <div className="max-w-4xl mx-auto px-4 py-24">
         <div className="text-center">

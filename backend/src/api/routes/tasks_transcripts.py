@@ -9,6 +9,7 @@ import logging
 from ...database import get_db
 from ...services.task_service import TaskService
 from ...video_utils import load_cached_transcript_data, format_ms_to_timestamp
+from .utils import _require_user_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/tasks", tags=["transcripts"])
@@ -17,9 +18,7 @@ router = APIRouter(prefix="/tasks", tags=["transcripts"])
 @router.get("/{task_id}/transcript/segments")
 async def get_task_transcript_segments(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Get the transcript with word-level timestamps/segments for editing."""
-    user_id = request.headers.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         task_service = TaskService(db)
@@ -125,9 +124,7 @@ async def get_transcript_words(task_id: str, request: Request, db: AsyncSession 
     Used by the review page to render a word-synced subtitle overlay on the
     source video without needing clip-relative offsets.
     """
-    user_id = request.headers.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         task_service = TaskService(db)
@@ -177,9 +174,7 @@ async def get_transcript_ass(task_id: str, request: Request, db: AsyncSession = 
     Query params:
         template: ASS template name (default: word-focus)
     """
-    user_id = request.headers.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     template = request.query_params.get("template", "word-focus")
     font_size_param = request.query_params.get("font_size")
@@ -241,9 +236,7 @@ async def get_transcript_ass(task_id: str, request: Request, db: AsyncSession = 
 @router.put("/{task_id}/transcript/segments")
 async def update_task_transcript_segments(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Update transcript segments (with timestamps) for a task."""
-    user_id = request.headers.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         data = await request.json()
@@ -294,9 +287,7 @@ async def update_task_transcript_segments(task_id: str, request: Request, db: As
 @router.get("/{task_id}/transcript")
 async def get_task_transcript(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Get the transcript for a task (for editing before clip generation)."""
-    user_id = request.headers.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         task_service = TaskService(db)
@@ -327,9 +318,7 @@ async def get_task_transcript(task_id: str, request: Request, db: AsyncSession =
 @router.put("/{task_id}/transcript")
 async def update_task_transcript(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Update the edited transcript for a task."""
-    user_id = request.headers.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         data = await request.json()

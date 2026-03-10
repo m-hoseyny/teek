@@ -4,14 +4,14 @@ import { useState, useRef, useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Link as LinkIcon, Upload, FileText, Clipboard, Zap, Video as VideoIcon, Minus, Plus, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useSession } from "@/lib/auth-client";
+import { useJwt } from "@/contexts/jwt-context";
 import { useRouter } from "next/navigation";
 import { useUploadContext } from "@/contexts/upload-context";
 
 interface Prompt { id: string; name: string; description: string; }
 
 export default function AnalysisPage() {
-  const { data: session } = useSession();
+  const { apiFetch, jwt } = useJwt();
   const router = useRouter();
   const { setPendingUpload } = useUploadContext();
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -31,15 +31,15 @@ export default function AnalysisPage() {
   const [promptId, setPromptId] = useState("");
 
   useEffect(() => {
-    if (!session?.user?.id) return;
-    fetch(`${apiUrl}/tasks/prompts`, { headers: { user_id: session.user.id } })
+    if (!jwt) return;
+    apiFetch(`${apiUrl}/tasks/prompts`)
       .then((r) => r.json())
       .then((data) => {
         setPrompts(data.prompts || []);
         setPromptId(data.default_prompt_id || "");
       })
       .catch(() => {});
-  }, [session?.user?.id, apiUrl]);
+  }, [jwt, apiUrl, apiFetch]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -71,7 +71,7 @@ export default function AnalysisPage() {
   const [error, setError] = useState<string | null>(null);
 
   const handleStartAnalysis = async () => {
-    if (!session?.user?.id) {
+    if (!jwt) {
       router.push("/sign-in");
       return;
     }
@@ -100,7 +100,6 @@ export default function AnalysisPage() {
           config: {
             clipsCount,
             promptId,
-            userId: session.user.id,
             srtContent,
           },
         });
@@ -131,11 +130,10 @@ export default function AnalysisPage() {
         (requestBody.transcription_options as Record<string, unknown>).srt_content = pastedTranscript;
       }
 
-      const response = await fetch(`${apiUrl}/tasks/`, {
+      const response = await apiFetch(`${apiUrl}/tasks/`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          user_id: session.user.id,
         },
         body: JSON.stringify(requestBody),
       });

@@ -10,7 +10,7 @@ export interface Prompt {
 
 interface UsePromptsOptions {
   apiUrl: string;
-  userId: string | undefined;
+  apiFetch: (url: string, init?: RequestInit) => Promise<Response>;
 }
 
 interface UsePromptsReturn {
@@ -20,22 +20,16 @@ interface UsePromptsReturn {
   isLoading: boolean;
 }
 
-export function usePrompts({ apiUrl, userId }: UsePromptsOptions): UsePromptsReturn {
+export function usePrompts({ apiUrl, apiFetch }: UsePromptsOptions): UsePromptsReturn {
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [selectedPromptId, setSelectedPromptId] = useState<string>("default");
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     const loadPrompts = async () => {
-      if (!userId) return;
-
       try {
         setIsLoading(true);
-        const response = await fetch(`${apiUrl}/tasks/prompts`, {
-          headers: {
-            user_id: userId,
-          },
-        });
+        const response = await apiFetch(`${apiUrl}/tasks/prompts`);
 
         if (!response.ok) {
           return;
@@ -56,7 +50,7 @@ export function usePrompts({ apiUrl, userId }: UsePromptsOptions): UsePromptsRet
     };
 
     void loadPrompts();
-  }, [apiUrl, userId]);
+  }, [apiUrl, apiFetch]);
 
   return {
     prompts,

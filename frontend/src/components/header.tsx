@@ -5,6 +5,7 @@ import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useSession } from "@/lib/auth-client";
+import { useJwt } from "@/contexts/jwt-context";
 import { useEffect, useState } from "react";
 
 interface UsageSummary {
@@ -43,30 +44,17 @@ function getPlanBadgeColor(plan: string): string {
 
 export function Header({ logoSize = 40, containerClassName }: HeaderProps) {
   const { data: session, isPending } = useSession();
+  const { apiFetch, jwt } = useJwt();
   const [usage, setUsage] = useState<UsageSummary | null>(null);
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
   useEffect(() => {
-    if (session?.user) {
-      fetchUsage();
-    }
-  }, [session]);
-
-  const fetchUsage = async () => {
-    try {
-      const response = await fetch(`${apiUrl}/tasks/subscription/usage`, {
-        headers: {
-          user_id: session?.user?.id || "",
-        },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setUsage(data);
-      }
-    } catch (error) {
-      console.error("Failed to fetch usage:", error);
-    }
-  };
+    if (!jwt) return;
+    apiFetch(`${apiUrl}/tasks/subscription/usage`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (data) setUsage(data); })
+      .catch((error) => console.error("Failed to fetch usage:", error));
+  }, [jwt, apiUrl, apiFetch]);
 
   if (isPending) {
     return (

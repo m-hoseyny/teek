@@ -5,7 +5,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import Link from "next/link";
 import { Play, Download, Share2, ChevronDown, ChevronRight, Search, Clapperboard } from "lucide-react";
 import { ClipModal } from "@/components/clip/ClipModal";
-import { useSession } from "@/lib/auth-client";
+import { useJwt } from "@/contexts/jwt-context";
 
 interface Clip {
   id: string;
@@ -34,7 +34,7 @@ interface Project {
 }
 
 export default function LibraryPage() {
-  const { data: session } = useSession();
+  const { apiFetch, jwt } = useJwt();
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
   const [projects, setProjects] = useState<Project[]>([]);
@@ -49,13 +49,11 @@ export default function LibraryPage() {
   // Fetch projects (tasks) from API - WITHOUT clips initially
   useEffect(() => {
     const fetchProjects = async () => {
-      if (!session?.user?.id) return;
+      if (!jwt) return;
 
       try {
         setIsLoading(true);
-        const response = await fetch(`${apiUrl}/tasks/`, {
-          headers: { user_id: session.user.id },
-        });
+        const response = await apiFetch(`${apiUrl}/tasks/`);
 
         if (!response.ok) {
           throw new Error("Failed to fetch tasks");
@@ -98,11 +96,11 @@ export default function LibraryPage() {
     };
 
     fetchProjects();
-  }, [session?.user?.id, apiUrl]);
+  }, [jwt, apiUrl, apiFetch]);
 
   // Fetch clips for a specific project
   const fetchClipsForProject = async (projectId: string) => {
-    if (!session?.user?.id || loadingClips.has(projectId)) return;
+    if (!jwt || loadingClips.has(projectId)) return;
 
     // Check if clips are already loaded
     const project = projects.find(p => p.id === projectId);
@@ -112,9 +110,7 @@ export default function LibraryPage() {
       setLoadingClips(prev => new Set(prev).add(projectId));
       console.log(`Fetching clips for project ${projectId}`);
 
-      const clipsResponse = await fetch(`${apiUrl}/tasks/${projectId}/clips`, {
-        headers: { user_id: session.user.id },
-      });
+      const clipsResponse = await apiFetch(`${apiUrl}/tasks/${projectId}/clips`);
 
       if (clipsResponse.ok) {
         const clipsResponseData = await clipsResponse.json();

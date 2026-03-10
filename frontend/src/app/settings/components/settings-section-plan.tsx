@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Check } from "lucide-react";
-import { useSession } from "@/lib/auth-client";
+import { useJwt } from "@/contexts/jwt-context";
 
 interface UsageStat {
   used: number;
@@ -60,25 +60,23 @@ const PLAN_FEATURES: Record<string, string[]> = {
 };
 
 export function SettingsSectionPlan() {
-  const { data: session } = useSession();
+  const { apiFetch, jwt } = useJwt();
   const [subscription, setSubscription] = useState<SubscriptionData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
   useEffect(() => {
-    if (!session?.user?.id) return;
+    if (!jwt) return;
 
     setIsLoading(true);
-    fetch(`${apiUrl}/tasks/subscription/usage`, {
-      headers: { user_id: session.user.id },
-    })
+    apiFetch(`${apiUrl}/tasks/subscription/usage`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data) setSubscription(data);
       })
       .catch(() => {})
       .finally(() => setIsLoading(false));
-  }, [session?.user?.id, apiUrl]);
+  }, [jwt, apiUrl]);
 
   if (isLoading) {
     return (

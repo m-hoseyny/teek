@@ -47,16 +47,12 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
 
-@router.get("/")
+@router.get("")
 async def list_tasks(request: Request, db: AsyncSession = Depends(get_db), limit: int = 50):
     """
     Get all tasks for the authenticated user.
     """
-    headers = request.headers
-    user_id = headers.get("user_id")
-
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         task_service = TaskService(db)
@@ -138,9 +134,7 @@ async def get_dashboard_stats(request: Request, db: AsyncSession = Depends(get_d
 @router.get("/prompts")
 async def list_prompts(request: Request):
     """Get all available prompt templates for clip generation."""
-    user_id = request.headers.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         prompts = PromptRepository.get_prompt_choices()
@@ -156,17 +150,16 @@ async def list_prompts(request: Request):
         raise HTTPException(status_code=500, detail=f"Error listing prompts: {str(e)}")
 
 
-@router.post("/")
+@router.post("")
 async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
     """
     Create a new task and enqueue it for processing.
     Returns task_id immediately.
     """
     data = await request.json()
-    headers = request.headers
+    user_id = _require_user_id(request)
 
     raw_source = data.get("source")
-    user_id = headers.get("user_id")
 
     # Get pycaps options from caption_options (or legacy font_options for backwards compat)
     caption_options = data.get("caption_options") or data.get("font_options") or {}
@@ -205,9 +198,6 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
 
     if not raw_source or not raw_source.get("url"):
         raise HTTPException(status_code=400, detail="Source URL is required")
-
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
 
     try:
         task_service = TaskService(db)
@@ -356,12 +346,10 @@ async def cancel_all_tasks(request: Request, db: AsyncSession = Depends(get_db))
         raise HTTPException(status_code=500, detail=f"Error cancelling tasks: {str(e)}")
 
 
-@router.delete("/")
+@router.delete("")
 async def delete_all_user_tasks(request: Request, db: AsyncSession = Depends(get_db)):
     """Delete all tasks for the authenticated user."""
-    user_id = request.headers.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         task_service = TaskService(db)
@@ -378,10 +366,7 @@ async def delete_all_user_tasks(request: Request, db: AsyncSession = Depends(get
 @router.get("/{task_id}")
 async def get_task(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Get task details."""
-    # EventSource in browsers cannot set custom headers, so allow query fallback.
-    user_id = request.headers.get("user_id") or request.query_params.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         task_service = TaskService(db)
@@ -407,10 +392,8 @@ async def get_task_progress_sse(task_id: str, request: Request, db: AsyncSession
     SSE endpoint for real-time progress updates.
     Streams progress updates as Server-Sent Events.
     """
-    # EventSource in browsers cannot set custom headers, so allow query fallback.
-    user_id = request.headers.get("user_id") or request.query_params.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    # EventSource cannot set custom headers, so _require_user_id also checks ?token= query param.
+    user_id = _require_user_id(request)
 
     task_service = TaskService(db)
     task = await task_service.task_repo.get_task_by_id(db, task_id)
@@ -481,11 +464,7 @@ async def get_task_progress_sse(task_id: str, request: Request, db: AsyncSession
 @router.patch("/{task_id}")
 async def update_task(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Update task details (title)."""
-    headers = request.headers
-    user_id = headers.get("user_id")
-
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         data = await request.json()
@@ -521,9 +500,7 @@ async def retry_task(task_id: str, request: Request, db: AsyncSession = Depends(
     Retry a failed task.
     Re-enqueues the task for processing with the same parameters.
     """
-    user_id = request.headers.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         task_service = TaskService(db)
@@ -594,9 +571,7 @@ async def reopen_task(task_id: str, request: Request, db: AsyncSession = Depends
     - If transcript exists but no clips: enqueue AI re-analysis
     - If no transcript: enqueue full pipeline with review stop
     """
-    user_id = request.headers.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         task_service = TaskService(db)
@@ -695,11 +670,7 @@ async def reopen_task(task_id: str, request: Request, db: AsyncSession = Depends
 async def delete_task(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Delete a task and all its associated clips."""
     try:
-        headers = request.headers
-        user_id = headers.get("user_id")
-
-        if not user_id:
-            raise HTTPException(status_code=401, detail="User authentication required")
+        user_id = _require_user_id(request)
 
         task_service = TaskService(db)
 

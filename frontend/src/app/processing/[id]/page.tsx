@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ProcessingView } from "@/components/clip/ProcessingView";
-import { useSession } from "@/lib/auth-client";
+import { useJwt } from "@/contexts/jwt-context";
 
 interface TaskStatus {
   task_id: string;
@@ -20,7 +20,7 @@ interface TaskStatus {
 export default function ProcessingPage() {
   const params = useParams();
   const router = useRouter();
-  const { data: session } = useSession();
+  const { apiFetch, jwt } = useJwt();
   const taskId = params.id as string;
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -29,14 +29,12 @@ export default function ProcessingPage() {
   const eventSourceRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
-    if (!session?.user?.id || !taskId) return;
+    if (!jwt || !taskId) return;
 
     // Initial fetch to get task info
     const fetchTask = async () => {
       try {
-        const response = await fetch(`${apiUrl}/tasks/${taskId}`, {
-          headers: { user_id: session.user.id },
-        });
+        const response = await apiFetch(`${apiUrl}/tasks/${taskId}`);
 
         if (response.ok) {
           const data = await response.json();
@@ -64,11 +62,11 @@ export default function ProcessingPage() {
 
     fetchTask();
 
-    // Set up SSE for real-time progress updates
+    // Set up SSE for real-time progress updates.
+    // Use the Next.js API route (/api/tasks/{id}/progress) instead of the
+    // rewrite proxy (/api/backend/...) because Next.js rewrites buffer SSE.
     const setupSSE = () => {
-      const eventSource = new EventSource(
-        `${apiUrl}/tasks/${taskId}/progress?user_id=${session.user.id}`
-      );
+      const eventSource = new EventSource(`/api/tasks/${taskId}/progress`);
 
       // Handle different SSE event types
       eventSource.addEventListener("status", (event: any) => {
@@ -161,9 +159,7 @@ export default function ProcessingPage() {
         // Fallback to polling if SSE fails
         const pollInterval = setInterval(async () => {
           try {
-            const response = await fetch(`${apiUrl}/tasks/${taskId}`, {
-              headers: { user_id: session.user.id },
-            });
+            const response = await apiFetch(`${apiUrl}/tasks/${taskId}`);
 
             if (response.ok) {
               const data = await response.json();
@@ -202,7 +198,7 @@ export default function ProcessingPage() {
         eventSourceRef.current.close();
       }
     };
-  }, [taskId, session?.user?.id, apiUrl, router]);
+  }, [taskId, jwt, apiUrl, router, apiFetch]);
 
   if (isLoading) {
     return (

@@ -5,7 +5,6 @@ import { createContext, useContext, useState, ReactNode } from "react";
 export interface PendingUploadConfig {
   clipsCount: number;
   promptId: string;
-  userId: string;
   srtContent?: string;
 }
 

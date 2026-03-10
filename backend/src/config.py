@@ -25,6 +25,8 @@ class Config:
         self.assembly_ai_api_key = os.getenv("ASSEMBLY_AI_API_KEY")
         self.admin_api_key = os.getenv("ADMIN_API_KEY")
         self.secret_encryption_key = os.getenv("SECRET_ENCRYPTION_KEY")
+        self.jwt_secret_key = os.getenv("JWT_SECRET_KEY", "")
+        self.jwt_expire_minutes = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
 
         self.max_video_duration = int(os.getenv("MAX_VIDEO_DURATION", "3600"))
         self.output_dir = os.getenv("OUTPUT_DIR", "outputs")

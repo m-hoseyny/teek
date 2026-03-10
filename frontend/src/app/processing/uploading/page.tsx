@@ -5,12 +5,12 @@ import { useRouter } from "next/navigation";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ProcessingView } from "@/components/clip/ProcessingView";
 import { useUploadContext } from "@/contexts/upload-context";
-import { useSession } from "@/lib/auth-client";
+import { useJwt } from "@/contexts/jwt-context";
 
 export default function UploadingPage() {
   const router = useRouter();
   const { pendingUpload, setPendingUpload } = useUploadContext();
-  const { data: session } = useSession();
+  const { apiFetch, jwt } = useJwt();
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -28,7 +28,7 @@ export default function UploadingPage() {
       return;
     }
 
-    if (!session?.user?.id) return;
+    if (!jwt) return;
     hasStarted.current = true;
 
     const { file, config } = pendingUpload;
@@ -80,12 +80,9 @@ export default function UploadingPage() {
           (requestBody.transcription_options as Record<string, unknown>).srt_content = config.srtContent;
         }
 
-        const response = await fetch(`${apiUrl}/tasks/`, {
+        const response = await apiFetch(`${apiUrl}/tasks/`, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            user_id: config.userId,
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify(requestBody),
         });
 
@@ -104,7 +101,7 @@ export default function UploadingPage() {
     };
 
     run();
-  }, [pendingUpload, session?.user?.id, apiUrl, router, setPendingUpload]);
+  }, [pendingUpload, jwt, apiUrl, router, setPendingUpload, apiFetch]);
 
   const taskStatus = {
     task_id: "",

@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Zap, TrendingUp, Clock, Video } from "lucide-react";
 import Link from "next/link";
-import { useSession } from "@/lib/auth-client";
+import { useJwt } from "@/contexts/jwt-context";
 
 interface RecentTask {
   id: string;
@@ -35,7 +35,7 @@ function timeAgo(isoDate: string | null): string {
 }
 
 export default function DashboardPage() {
-  const { data: session } = useSession();
+  const { apiFetch, isReady } = useJwt();
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -43,13 +43,9 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const fetchDashboard = async () => {
-      if (!session?.user?.id) return;
-
       try {
         setIsLoading(true);
-        const response = await fetch(`${apiUrl}/tasks/dashboard`, {
-          headers: { user_id: session.user.id },
-        });
+        const response = await apiFetch(`${apiUrl}/tasks/dashboard`);
 
         if (!response.ok) throw new Error("Failed to fetch dashboard stats");
 
@@ -62,8 +58,8 @@ export default function DashboardPage() {
       }
     };
 
-    fetchDashboard();
-  }, [session?.user?.id, apiUrl]);
+    if (isReady) fetchDashboard();
+  }, [isReady, apiFetch, apiUrl]);
 
   const statCards = stats
     ? [

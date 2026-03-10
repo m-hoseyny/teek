@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useJwt } from "@/contexts/jwt-context";
 import { X, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -18,7 +19,6 @@ interface ClipPreviewModalProps {
   onClose: () => void;
   clipId: string;
   taskId: string;
-  userId: string;
   sourceVideoUrl: string;
   startTime: string;
   endTime: string;
@@ -37,12 +37,12 @@ export function ClipPreviewModal({
   onClose,
   clipId,
   taskId,
-  userId,
   sourceVideoUrl,
   startTime,
   endTime,
   text,
 }: ClipPreviewModalProps) {
+  const { apiFetch } = useJwt();
   const [words, setWords] = useState<Word[]>([]);
   const [templates, setTemplates] = useState<PycapsTemplate[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<string>("word-focus");
@@ -55,14 +55,12 @@ export function ClipPreviewModal({
 
   // Load word-level timing data for the clip
   useEffect(() => {
-    if (!isOpen || !clipId || !taskId || !userId) return;
+    if (!isOpen || !clipId || !taskId) return;
 
     const loadClipWords = async () => {
       try {
         setIsLoadingWords(true);
-        const response = await fetch(`${apiUrl}/tasks/${taskId}/clips/${clipId}/words`, {
-          headers: { user_id: userId },
-        });
+        const response = await apiFetch(`${apiUrl}/tasks/${taskId}/clips/${clipId}/words`);
 
         if (!response.ok) {
           console.error(`Failed to load clip words: ${response.status}`);
@@ -80,7 +78,7 @@ export function ClipPreviewModal({
     };
 
     loadClipWords();
-  }, [isOpen, clipId, taskId, userId, apiUrl]);
+  }, [isOpen, clipId, taskId, apiUrl, apiFetch]);
 
   // Load available pycaps templates
   useEffect(() => {

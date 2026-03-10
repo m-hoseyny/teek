@@ -18,7 +18,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { useSession } from "@/lib/auth-client";
+import { useJwt } from "@/contexts/jwt-context";
 import { ArrowLeft, Download, Clock, Star, AlertCircle, Trash2, Edit2, X, Check, FileText, Play, Save, Eye, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import DynamicVideoPlayer, { type VideoPlayerRef } from "@/components/dynamic-video-player";
@@ -137,7 +137,8 @@ function deriveStageNotesFromMessage(
 export default function TaskPage() {
   const params = useParams();
   const router = useRouter();
-  const { data: session, isPending } = useSession();
+  const { apiFetch, jwt, isReady } = useJwt();
+  const isPending = !isReady;
   const [task, setTask] = useState<TaskDetails | null>(null);
   const [clips, setClips] = useState<Clip[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -179,16 +180,16 @@ export default function TaskPage() {
   };
 
   const handleSaveClip = async (clipId: string) => {
-    if (!userId || !taskId) return;
-    
+    if (!jwt || !taskId) return;
+
     try {
       setIsSavingClip(true);
       setTranscriptError(null);
-      
+
       // Save time - backend will automatically extract transcript for the new time range
-      const timeResponse = await fetch(`${apiUrl}/tasks/${taskId}/clips/${clipId}/time`, {
+      const timeResponse = await apiFetch(`${apiUrl}/tasks/${taskId}/clips/${clipId}/time`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", user_id: userId },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           start_time: editedClipData.start_time, 
           end_time: editedClipData.end_time 
@@ -244,17 +245,14 @@ export default function TaskPage() {
   const sourcePlayerRef = useRef<VideoPlayerRef | null>(null);
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
   const taskId = Array.isArray(params.id) ? params.id[0] : params.id;
-  const userId = session?.user?.id;
   const sourceVideoUrl = task?.source_video_url ? `${apiUrl}${task.source_video_url}` : null;
 
   // Fetch transcript when task is in awaiting_review status
   const fetchTranscript = useCallback(async () => {
-    if (!taskId || !userId) return;
+    if (!taskId || !jwt) return;
 
     try {
-      const response = await fetch(`${apiUrl}/tasks/${taskId}/transcript`, {
-        headers: { user_id: userId },
-      });
+      const response = await apiFetch(`${apiUrl}/tasks/${taskId}/transcript`);
 
       if (!response.ok) {
         throw new Error(`Failed to fetch transcript: ${response.status}`);
@@ -267,7 +265,7 @@ export default function TaskPage() {
       console.error("Error fetching transcript:", err);
       setTranscriptError(err instanceof Error ? err.message : "Failed to load transcript");
     }
-  }, [apiUrl, taskId, userId]);
+  }, [apiUrl, taskId, jwt, apiFetch]);
 
   // Fetch transcript when task status changes to awaiting_review or completed
   useEffect(() => {
@@ -289,16 +287,10 @@ export default function TaskPage() {
   }, [task?.source_type]);
 
   const fetchTaskStatus = useCallback(async (retryCount = 0, maxRetries = 5) => {
-    if (!taskId || !userId) return false;
+    if (!taskId || !jwt) return false;
 
     try {
-      const headers: HeadersInit = {
-        user_id: userId,
-      };
-
-      const taskResponse = await fetch(`${apiUrl}/tasks/${taskId}`, {
-        headers,
-      });
+      const taskResponse = await apiFetch(`${apiUrl}/tasks/${taskId}`);
 
       // Handle 404 with retry logic (task might not be persisted yet)
       if (taskResponse.status === 404 && retryCount < maxRetries) {
@@ -326,9 +318,7 @@ export default function TaskPage() {
 
       // Only fetch clips if task is completed
       if (taskData.status === "completed") {
-        const clipsResponse = await fetch(`${apiUrl}/tasks/${taskId}/clips`, {
-          headers,
-        });
+        const clipsResponse = await apiFetch(`${apiUrl}/tasks/${taskId}/clips`);
 
         if (!clipsResponse.ok) {
           throw new Error(`Failed to fetch clips: ${clipsResponse.status}`);
@@ -346,11 +336,11 @@ export default function TaskPage() {
       setError(err instanceof Error ? err.message : "Failed to load task");
       return false;
     }
-  }, [apiUrl, taskId, userId]);
+  }, [apiUrl, taskId, jwt, apiFetch]);
 
   // Initial fetch
   useEffect(() => {
-    if (!taskId || !userId) {
+    if (!taskId || !jwt) {
       setIsLoading(false);
       return;
     }
@@ -365,11 +355,11 @@ export default function TaskPage() {
     };
 
     fetchTaskData();
-  }, [fetchTaskStatus, taskId, userId]);
+  }, [fetchTaskStatus, taskId, jwt]);
 
   // Poll task status while queued/processing.
   useEffect(() => {
-    if (!taskId || !userId || !task?.status) return;
+    if (!taskId || !jwt || !task?.status) return;
     if (task.status !== "queued" && task.status !== "processing") return;
 
     const intervalId = window.setInterval(() => {
@@ -382,14 +372,14 @@ export default function TaskPage() {
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [fetchTaskStatus, task?.status, taskId, userId]);
+  }, [fetchTaskStatus, task?.status, taskId, jwt]);
 
   // Subscribe to backend SSE progress stream for real-time updates.
   useEffect(() => {
-    if (!taskId || !userId || !task?.status) return;
+    if (!taskId || !jwt || !task?.status) return;
     if (task.status !== "queued" && task.status !== "processing") return;
 
-    const progressUrl = `${apiUrl}/tasks/${taskId}/progress?user_id=${encodeURIComponent(userId)}`;
+    const progressUrl = `/api/tasks/${taskId}/progress`;
     const eventSource = new EventSource(progressUrl);
 
     const handleStatusOrProgress = (event: MessageEvent) => {
@@ -459,7 +449,7 @@ export default function TaskPage() {
       eventSource.removeEventListener("close", handleClose);
       eventSource.close();
     };
-  }, [apiUrl, fetchTaskStatus, task?.status, taskId, userId]);
+  }, [apiUrl, fetchTaskStatus, task?.status, taskId, jwt]);
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -514,15 +504,12 @@ export default function TaskPage() {
   };
 
   const handleEditTitle = async () => {
-    if (!editedTitle.trim() || !session?.user?.id || !params.id) return;
+    if (!editedTitle.trim() || !jwt || !params.id) return;
 
     try {
-      const response = await fetch(`${apiUrl}/tasks/${params.id}`, {
+      const response = await apiFetch(`${apiUrl}/tasks/${params.id}`, {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          user_id: session.user.id,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: editedTitle }),
       });
 
@@ -539,15 +526,12 @@ export default function TaskPage() {
   };
 
   const handleDeleteTask = async () => {
-    if (!session?.user?.id || !params.id) return;
+    if (!jwt || !params.id) return;
 
     setIsDeleting(true);
     try {
-      const response = await fetch(`${apiUrl}/tasks/${params.id}`, {
+      const response = await apiFetch(`${apiUrl}/tasks/${params.id}`, {
         method: "DELETE",
-        headers: {
-          user_id: session.user.id,
-        },
       });
 
       if (response.ok) {
@@ -565,18 +549,15 @@ export default function TaskPage() {
   };
 
   const handleSaveTranscript = async () => {
-    if (!session?.user?.id || !taskId) return;
+    if (!jwt || !taskId) return;
 
     try {
       setIsSavingTranscript(true);
       setTranscriptError(null);
 
-      const response = await fetch(`${apiUrl}/tasks/${taskId}/transcript`, {
+      const response = await apiFetch(`${apiUrl}/tasks/${taskId}/transcript`, {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          user_id: session.user.id,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ transcript: editedTranscript }),
       });
 
@@ -596,7 +577,7 @@ export default function TaskPage() {
   };
 
   const handleGenerateClips = async () => {
-    if (!session?.user?.id || !taskId) return;
+    if (!jwt || !taskId) return;
 
     try {
       setIsGeneratingClips(true);
@@ -607,11 +588,8 @@ export default function TaskPage() {
         await handleSaveTranscript();
       }
 
-      const response = await fetch(`${apiUrl}/tasks/${taskId}/generate-clips`, {
+      const response = await apiFetch(`${apiUrl}/tasks/${taskId}/generate-clips`, {
         method: "POST",
-        headers: {
-          user_id: session.user.id,
-        },
       });
 
       if (!response.ok) {
@@ -633,15 +611,14 @@ export default function TaskPage() {
   const [isReopening, setIsReopening] = useState(false);
 
   const handleReopenTask = async () => {
-    if (!userId || !taskId) return;
+    if (!jwt || !taskId) return;
 
     try {
       setIsReopening(true);
       setTranscriptError(null);
 
-      const response = await fetch(`${apiUrl}/tasks/${taskId}/reopen`, {
+      const response = await apiFetch(`${apiUrl}/tasks/${taskId}/reopen`, {
         method: "POST",
-        headers: { user_id: userId },
       });
 
       if (!response.ok) {
@@ -660,17 +637,14 @@ export default function TaskPage() {
   };
 
   const handleRetryGenerateClips = async () => {
-    if (!session?.user?.id || !taskId) return;
+    if (!jwt || !taskId) return;
 
     try {
       setIsRetrying(true);
       setTranscriptError(null);
 
-      const response = await fetch(`${apiUrl}/tasks/${taskId}/retry-clips`, {
+      const response = await apiFetch(`${apiUrl}/tasks/${taskId}/retry-clips`, {
         method: "POST",
-        headers: {
-          user_id: session.user.id,
-        },
       });
 
       if (!response.ok) {
@@ -690,11 +664,8 @@ export default function TaskPage() {
 
   const handleDeleteClip = async (clipId: string) => {
     try {
-      const response = await fetch(`${apiUrl}/tasks/${params.id}/clips/${clipId}`, {
+      const response = await apiFetch(`${apiUrl}/tasks/${params.id}/clips/${clipId}`, {
         method: "DELETE",
-        headers: {
-          user_id: session.user.id,
-        },
       });
 
       if (response.ok) {
@@ -1713,13 +1684,12 @@ export default function TaskPage() {
       </AlertDialog>
 
       {/* Subtitle Preview Modal */}
-      {previewClipId && selectedClipData && sourceVideoUrl && userId && taskId && (
+      {previewClipId && selectedClipData && sourceVideoUrl && jwt && taskId && (
         <ClipPreviewModal
           isOpen
           onClose={() => { setPreviewClipId(null); setSelectedClipData(null); }}
           clipId={previewClipId}
           taskId={taskId}
-          userId={userId}
           sourceVideoUrl={sourceVideoUrl}
           startTime={selectedClipData.startTime}
           endTime={selectedClipData.endTime}

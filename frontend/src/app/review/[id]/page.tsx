@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useSession } from "@/lib/auth-client";
+import { useJwt } from "@/contexts/jwt-context";
 import { Play, Pause, Eye, EyeOff, Check, Scissors } from "lucide-react";
 import { AssSubtitleRenderer } from "@/components/clip/AssSubtitleRenderer";
 
@@ -104,6 +105,7 @@ export default function ReviewPage() {
   const params = useParams();
   const router = useRouter();
   const { data: session } = useSession();
+  const { jwt, apiFetch } = useJwt();
   const taskId = params.id as string;
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -138,16 +140,15 @@ export default function ReviewPage() {
   const animFrameRef = useRef<number>();
 
   useEffect(() => {
-    if (!session?.user?.id || !taskId) return;
-    const uid = session.user.id;
+    if (!jwt || !taskId) return;
 
     const fetchTask = async () => {
-      const res = await fetch(`${apiUrl}/tasks/${taskId}`, { headers: { user_id: uid } });
+      const res = await apiFetch(`${apiUrl}/tasks/${taskId}`);
       if (res.ok) setTask(await res.json());
     };
 
     const fetchSegments = async () => {
-      const res = await fetch(`${apiUrl}/tasks/${taskId}/transcript/segments`, { headers: { user_id: uid } });
+      const res = await apiFetch(`${apiUrl}/tasks/${taskId}/transcript/segments`);
       if (res.ok) {
         const data = await res.json();
         setSegments(data.segments || []);
@@ -155,7 +156,7 @@ export default function ReviewPage() {
     };
 
     const fetchAss = async (template: string) => {
-      const res = await fetch(`${apiUrl}/tasks/${taskId}/transcript/ass?template=${encodeURIComponent(template)}`, { headers: { user_id: uid } });
+      const res = await apiFetch(`${apiUrl}/tasks/${taskId}/transcript/ass?template=${encodeURIComponent(template)}`);
       if (res.ok) {
         const data = await res.json();
         setBaseAssContent(data.ass_content || null);
@@ -163,7 +164,7 @@ export default function ReviewPage() {
     };
 
     const fetchVideo = async () => {
-      const res = await fetch(`${apiUrl}/tasks/${taskId}/source-video`, { headers: { user_id: uid } });
+      const res = await apiFetch(`${apiUrl}/tasks/${taskId}/source-video`);
       if (res.ok) {
         const blob = await res.blob();
         setVideoSrc(URL.createObjectURL(blob));
@@ -171,7 +172,7 @@ export default function ReviewPage() {
     };
 
     const fetchClips = async () => {
-      const res = await fetch(`${apiUrl}/tasks/${taskId}/clips`, { headers: { user_id: uid } });
+      const res = await apiFetch(`${apiUrl}/tasks/${taskId}/clips`);
       if (res.ok) {
         const data = await res.json();
         setClips(data.clips || []);
@@ -198,17 +199,16 @@ export default function ReviewPage() {
     fetchVideo();
     fetchClips();
     fetchSubtitleDefaults();
-  }, [taskId, session?.user?.id, apiUrl]);
+  }, [taskId, jwt, apiUrl, apiFetch]);
 
   // Re-fetch base ASS only when template changes (font size is applied client-side)
   useEffect(() => {
-    if (!session?.user?.id || !taskId) return;
-    const uid = session.user.id;
-    fetch(`${apiUrl}/tasks/${taskId}/transcript/ass?template=${encodeURIComponent(selectedStyle)}`, { headers: { user_id: uid } })
+    if (!jwt || !taskId) return;
+    apiFetch(`${apiUrl}/tasks/${taskId}/transcript/ass?template=${encodeURIComponent(selectedStyle)}`)
       .then((r) => r.ok ? r.json() : null)
       .then((data) => { if (data) setBaseAssContent(data.ass_content || null); })
       .catch(() => {});
-  }, [selectedStyle, taskId, session?.user?.id, apiUrl]);
+  }, [selectedStyle, taskId, jwt, apiUrl, apiFetch]);
 
   // Fetch available templates from the backend
   useEffect(() => {
@@ -283,11 +283,11 @@ export default function ReviewPage() {
   };
 
   const handleSaveTranscript = async () => {
-    if (!session?.user?.id) return;
+    if (!jwt) return;
     try {
-      await fetch(`${apiUrl}/tasks/${taskId}/transcript/segments`, {
+      await apiFetch(`${apiUrl}/tasks/${taskId}/transcript/segments`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", user_id: session.user.id },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ segments }),
       });
     } catch (error) {
@@ -328,9 +328,9 @@ export default function ReviewPage() {
 
     setSavingClipId(clip.id);
     try {
-      await fetch(`${apiUrl}/tasks/${taskId}/clips/${clip.id}/time`, {
+      await apiFetch(`${apiUrl}/tasks/${taskId}/clips/${clip.id}/time`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", user_id: session!.user.id },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ start_time: String(newStart), end_time: String(newEnd) }),
       });
     } catch (error) {
@@ -341,13 +341,13 @@ export default function ReviewPage() {
   };
 
   const handleGenerateClips = async () => {
-    if (!session?.user?.id) return;
+    if (!jwt) return;
     setIsGenerating(true);
     try {
       await handleSaveTranscript();
-      const response = await fetch(`${apiUrl}/tasks/${taskId}/generate-clips`, {
+      const response = await apiFetch(`${apiUrl}/tasks/${taskId}/generate-clips`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", user_id: session.user.id },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           transitions_enabled: transitionsEnabled,
           aspect_ratio: aspectRatio,

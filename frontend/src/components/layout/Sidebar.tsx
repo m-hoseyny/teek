@@ -6,7 +6,7 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { LayoutDashboard, Sparkles, Video, Wand2, Settings, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useSession } from "@/lib/auth-client";
+import { useJwt } from "@/contexts/jwt-context";
 
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -36,22 +36,20 @@ interface SidebarProps {
 
 export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const pathname = usePathname();
-  const { data: session } = useSession();
+  const { apiFetch, jwt } = useJwt();
   const [subscription, setSubscription] = useState<SubscriptionData | null>(null);
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
   useEffect(() => {
-    if (!session?.user?.id) return;
+    if (!jwt) return;
 
-    fetch(`${apiUrl}/tasks/subscription/usage`, {
-      headers: { user_id: session.user.id },
-    })
+    apiFetch(`${apiUrl}/tasks/subscription/usage`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data) setSubscription(data);
       })
       .catch(() => {});
-  }, [session?.user?.id, apiUrl]);
+  }, [jwt, apiUrl, apiFetch]);
 
   const planName = subscription?.plan_name ?? subscription?.plan?.toUpperCase() ?? "FREE";
   const isUnlimited = subscription?.clip_generations?.limit === "Unlimited";

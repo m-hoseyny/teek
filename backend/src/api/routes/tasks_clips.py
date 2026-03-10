@@ -21,9 +21,7 @@ router = APIRouter(prefix="/tasks", tags=["clips"])
 @router.get("/{task_id}/clips")
 async def get_task_clips(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Get all clips for a task."""
-    user_id = request.headers.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         task_service = TaskService(db)
@@ -50,9 +48,7 @@ async def get_task_clips(task_id: str, request: Request, db: AsyncSession = Depe
 @router.get("/{task_id}/clips/{clip_id}/words")
 async def get_clip_words(task_id: str, clip_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Get word-level timing data for a clip to enable subtitle preview."""
-    user_id = request.headers.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         task_service = TaskService(db)
@@ -128,9 +124,7 @@ async def get_clip_ass(
     Query params:
         template: ASS template name (default: clip's stored template)
     """
-    user_id = request.headers.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     template_override = request.query_params.get("template")
     clip_start_seconds_str = request.query_params.get("clip_start_seconds", "0")
@@ -200,11 +194,7 @@ async def get_clip_ass(
 async def delete_clip(task_id: str, clip_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Delete a specific clip."""
     try:
-        headers = request.headers
-        user_id = headers.get("user_id")
-
-        if not user_id:
-            raise HTTPException(status_code=401, detail="User authentication required")
+        user_id = _require_user_id(request)
 
         task_service = TaskService(db)
 
@@ -241,9 +231,7 @@ async def retry_clips_generation(task_id: str, request: Request, db: AsyncSessio
     Deletes existing clips, re-runs AI analysis on the transcript,
     and creates new clip records for user review.
     """
-    user_id = request.headers.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         task_service = TaskService(db)
@@ -296,12 +284,40 @@ async def retry_clips_generation(task_id: str, request: Request, db: AsyncSessio
         raise HTTPException(status_code=500, detail=f"Error starting clip retry: {str(e)}")
 
 
+@router.post("/{task_id}/reopen")
+async def reopen_task(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Reset a completed task back to awaiting_review so the user can edit and regenerate clips."""
+    user_id = _require_user_id(request)
+
+    try:
+        task_service = TaskService(db)
+        task = await task_service.task_repo.get_task_by_id(db, task_id)
+
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to access this task")
+
+        if task.get("status") != "completed":
+            raise HTTPException(status_code=400, detail="Only completed tasks can be reopened")
+
+        await task_service.task_repo.update_task_status(
+            db, task_id, "awaiting_review", progress=100, progress_message="Reopened for editing"
+        )
+
+        return {"message": "Task reopened", "task_id": task_id, "status": "awaiting_review"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error reopening task: {e}")
+        raise HTTPException(status_code=500, detail=f"Error reopening task: {str(e)}")
+
+
 @router.post("/{task_id}/generate-clips")
 async def generate_clips_from_transcript(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Generate video files from reviewed clip records and enqueue for processing."""
-    user_id = request.headers.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         # Parse optional body
@@ -387,9 +403,7 @@ async def update_clip_transcript(
     db: AsyncSession = Depends(get_db)
 ):
     """Update the transcript text for a specific clip."""
-    user_id = request.headers.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         data = await request.json()
@@ -442,9 +456,7 @@ async def update_clip_time(
     db: AsyncSession = Depends(get_db)
 ):
     """Update the start/end time for a specific clip and auto-extract transcript for the new time range."""
-    user_id = request.headers.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         data = await request.json()
@@ -545,9 +557,7 @@ async def update_clip_template(
     db: AsyncSession = Depends(get_db),
 ):
     """Update the pycaps template for a specific clip."""
-    user_id = request.headers.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         data = await request.json()
@@ -600,9 +610,7 @@ async def render_clip(
         { "pycaps_template": "word-focus" }
     If not provided, uses the clip's stored template.
     """
-    user_id = request.headers.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         data = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
