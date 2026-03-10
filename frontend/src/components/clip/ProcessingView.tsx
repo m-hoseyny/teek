@@ -283,29 +283,6 @@ export function ProcessingView({ taskStatus }: ProcessingViewProps) {
 
         {/* Right Column - Preview & Status */}
         <div className="space-y-4 md:space-y-6">
-          {/* Video Preview */}
-          <div className="glass rounded-2xl p-4">
-            <div className="aspect-video bg-black rounded-lg flex items-center justify-center mb-3 overflow-hidden">
-              <div className="relative w-full h-full">
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="w-16 h-16 rounded-full bg-gradient-purple flex items-center justify-center glow-purple">
-                    <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 16 16">
-                      <path d="M11.596 8.697l-6.363 3.692c-.54.313-1.233-.066-1.233-.697V4.308c0-.63.692-1.01 1.233-.696l6.363 3.692a.802.802 0 0 1 0 1.393z"/>
-                    </svg>
-                  </div>
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
-                </div>
-              </div>
-            </div>
-            <h3 className="font-semibold text-white mb-1 truncate">
-              {taskStatus?.source_title || "Processing..."}
-            </h3>
-            <p className="text-xs text-muted-foreground">
-              {taskStatus?.status === "processing" ? "Processing..." : "Ready"}
-              {taskStatus?.clips_count ? ` • ${taskStatus.clips_count} clips` : ""}
-            </p>
-          </div>
-
           {/* Viral Tip */}
           <div className="glass rounded-xl p-4 border-l-4 border-primary">
             <div className="flex items-start gap-3">
