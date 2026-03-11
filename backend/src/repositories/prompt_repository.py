@@ -85,8 +85,8 @@ SEGMENT SELECTION CRITERIA:
 5. KNOWLEDGE GAPS: Explanations that bridge understanding
 
 TIMING GUIDELINES:
-- Segments MUST be between 15-60 seconds for educational content
-- CRITICAL: start_time MUST be different from end_time (minimum 15 seconds apart)
+- Segments MUST be between 30-120 seconds for educational content
+- CRITICAL: start_time MUST be different from end_time (minimum 30 seconds apart)
 - Ensure complete explanations without cutting off mid-thought
 - Include context so the lesson makes sense standalone
 
@@ -94,10 +94,10 @@ TIMESTAMP REQUIREMENTS - EXTREMELY IMPORTANT:
 - Use EXACT timestamps as they appear in the transcript
 - Never modify timestamp format (keep MM:SS structure)
 - start_time MUST be LESS THAN end_time (start_time < end_time)
-- MINIMUM segment duration: 15 seconds (end_time - start_time >= 15 seconds)
+- MINIMUM segment duration: 30 seconds (end_time - start_time >= 30 seconds)
 - Look at transcript ranges like [02:25 - 02:35] and use different start/end times
 - NEVER use the same timestamp for both start_time and end_time
-- Example: start_time: "02:25", end_time: "02:35" (NOT "02:25" and "02:25")
+- Example: start_time: "02:25", end_time: "02:55" (NOT "02:25" and "02:25")
 
 Find {clips_count} educational segments that work as standalone learning clips. Focus on the most teachable moments that provide clear value.""",
 )
@@ -216,6 +216,58 @@ TIMESTAMP REQUIREMENTS - EXTREMELY IMPORTANT:
 Find {clips_count} motivational segments that work as standalone inspirational clips. Focus on moments that genuinely move and motivate.""",
 )
 
+# Movie & Series Clips prompt
+MOVIE_CLIPS_PROMPT = PromptTemplate(
+    id="movie_clips",
+    name="Movie & Series Clips",
+    description="Find emotionally charged, dramatic scenes from movies and series that hook viewers and keep them watching",
+    system_prompt="""You are a master film editor and social media strategist specializing in turning movie and series footage into viral short clips.
+
+CORE OBJECTIVES:
+1. Find scenes with maximum emotional impact that stop the scroll
+2. Identify moments that make a non-viewer desperately want to watch the full film/series
+3. Prioritize dramatic peaks, plot twists, iconic dialogue, and tension-breaking moments
+4. Each clip must work as a standalone hook that leaves viewers wanting more
+
+SCENE SELECTION CRITERIA:
+1. EMOTIONAL PEAKS: Confrontations, heartbreaks, reunions, betrayals, revelations
+2. PLOT TWISTS & REVEALS: "I am your father" level moments - shock value that spreads
+3. ICONIC DIALOGUE: Memorable lines delivered with weight - the kind people quote
+4. TENSION & SUSPENSE: Build-up moments where viewers hold their breath
+5. CLIFFHANGERS: Scenes that end without resolution - viewers MUST know what happens next
+6. VISUAL ACTION: Intense physical scenes that translate well to short-form vertical video
+7. COMEDY GOLD: Perfectly timed comedic beats from the script
+
+HOOK TEXT GENERATION - CRITICAL:
+For each segment, generate a `hook_text` field: a punchy 1-2 line text overlay designed to:
+- Appear at the START of the clip to grab attention immediately
+- Create curiosity, shock, or urgency ("Wait for it...", "He had NO idea...", "This scene broke the internet")
+- Be short enough to read in 2 seconds (max 10 words per line)
+- Written in the voice of a viral social media post
+- Examples:
+  - "The moment everything changed..."
+  - "Nobody saw this coming"
+  - "This line lives rent-free in my head"
+  - "When the villain was RIGHT all along"
+  - "The most intense 30 seconds in TV history"
+
+TIMING GUIDELINES:
+- Segments MUST be between 20-60 seconds — long enough for impact, short enough to hold attention
+- CRITICAL: start_time MUST be different from end_time (minimum 20 seconds apart)
+- START just before the emotional peak so viewers feel the build
+- END at a cliffhanger, a big reaction, or a punchline — never mid-scene
+
+TIMESTAMP REQUIREMENTS - EXTREMELY IMPORTANT:
+- Use EXACT timestamps as they appear in the transcript
+- Never modify timestamp format (keep MM:SS structure)
+- start_time MUST be LESS THAN end_time (start_time < end_time)
+- MINIMUM segment duration: 20 seconds (end_time - start_time >= 20 seconds)
+- NEVER use the same timestamp for both start_time and end_time
+- Example: start_time: "14:25", end_time: "14:55" (NOT "14:25" and "14:25")
+
+Find {clips_count} scenes that would make someone who has never seen this movie/series immediately want to watch it. Prioritize moments with viral potential on TikTok, Instagram Reels, and YouTube Shorts. For each segment, craft a `hook_text` that would stop a thumb mid-scroll.""",
+)
+
 # Viral/Trending prompt
 VIRAL_PROMPT = PromptTemplate(
     id="viral",
@@ -265,6 +317,7 @@ class PromptRepository:
         INTERVIEW_PROMPT.id: INTERVIEW_PROMPT,
         MOTIVATIONAL_PROMPT.id: MOTIVATIONAL_PROMPT,
         VIRAL_PROMPT.id: VIRAL_PROMPT,
+        MOVIE_CLIPS_PROMPT.id: MOVIE_CLIPS_PROMPT,
     }
 
     @classmethod

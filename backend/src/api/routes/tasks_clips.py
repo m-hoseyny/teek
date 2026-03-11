@@ -1,7 +1,9 @@
 """
 Clip API routes for task clip management.
 """
+from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 import json
 import logging
@@ -19,9 +21,7 @@ router = APIRouter(prefix="/tasks", tags=["clips"])
 @router.get("/{task_id}/clips")
 async def get_task_clips(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Get all clips for a task."""
-    user_id = request.headers.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         task_service = TaskService(db)
@@ -45,15 +45,156 @@ async def get_task_clips(task_id: str, request: Request, db: AsyncSession = Depe
         raise HTTPException(status_code=500, detail=f"Error retrieving clips: {str(e)}")
 
 
+@router.get("/{task_id}/clips/{clip_id}/words")
+async def get_clip_words(task_id: str, clip_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Get word-level timing data for a clip to enable subtitle preview."""
+    user_id = _require_user_id(request)
+
+    try:
+        task_service = TaskService(db)
+
+        # Verify task ownership
+        task = await task_service.task_repo.get_task_by_id(db, task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to access this task")
+
+        # Get all clips for task to find the specific clip with full data
+        clips = await task_service.clip_repo.get_clips_by_task(db, task_id)
+        clip = next((c for c in clips if c["id"] == clip_id), None)
+
+        if not clip:
+            raise HTTPException(status_code=404, detail="Clip not found")
+
+        # Parse word-level data (already parsed in get_clips_by_task)
+        words = clip.get("words", [])
+
+        # Fallback: if words_json is empty (clips created before word extraction was added),
+        # read directly from the transcript cache on disk.
+        if not words:
+            metadata = task.get("metadata") or {}
+            video_path_str = metadata.get("video_path")
+            if video_path_str:
+                from pathlib import Path
+                from ...video_utils import load_cached_transcript_data, parse_timestamp_to_seconds
+                cached = load_cached_transcript_data(Path(video_path_str))
+                if cached and cached.get("words"):
+                    s_ms = int(parse_timestamp_to_seconds(clip["start_time"]) * 1000)
+                    e_ms = int(parse_timestamp_to_seconds(clip["end_time"]) * 1000)
+                    for wd in cached["words"]:
+                        ws, we = wd.get("start", 0), wd.get("end", 0)
+                        if ws < e_ms and we > s_ms:
+                            words.append({
+                                "text": wd["text"],
+                                "start": max(0, ws - s_ms),
+                                "end": min(e_ms - s_ms, we - s_ms),
+                            })
+
+        return {
+            "clip_id": clip_id,
+            "task_id": task_id,
+            "start_time": clip["start_time"],
+            "end_time": clip["end_time"],
+            "text": clip["text"],
+            "pycaps_template": clip.get("pycaps_template", "word-focus"),
+            "words": words,  # Array of {text, start, end} in milliseconds
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving clip words: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error retrieving clip words: {str(e)}")
+
+
+@router.get("/{task_id}/clips/{clip_id}/ass")
+async def get_clip_ass(
+    task_id: str,
+    clip_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return an ASS subtitle file for a clip.
+
+    The same ASS content is used by jassub-worker in the browser preview
+    and by ffmpeg when burning subtitles into the video — guaranteeing a
+    pixel-perfect match.
+
+    Query params:
+        template: ASS template name (default: clip's stored template)
+    """
+    user_id = _require_user_id(request)
+
+    template_override = request.query_params.get("template")
+    clip_start_seconds_str = request.query_params.get("clip_start_seconds", "0")
+    font_size_param = request.query_params.get("font_size")
+    try:
+        time_offset_ms = int(float(clip_start_seconds_str) * 1000)
+    except ValueError:
+        time_offset_ms = 0
+
+    try:
+        task_service = TaskService(db)
+
+        task = await task_service.task_repo.get_task_by_id(db, task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+
+        clips = await task_service.clip_repo.get_clips_by_task(db, task_id)
+        clip = next((c for c in clips if c["id"] == clip_id), None)
+        if not clip:
+            raise HTTPException(status_code=404, detail="Clip not found")
+
+        words = clip.get("words", [])
+        if not words:
+            raise HTTPException(status_code=400, detail="No word-level timing data for this clip")
+
+        template = template_override or clip.get("pycaps_template") or "word-focus"
+
+        # Merge subtitle_style: task baseline + clip overrides
+        task_metadata = task.get("metadata") or {}
+        task_subtitle_style = task_metadata.get("subtitle_style", {})
+        clip_subtitle_style = (clip.get("metadata") or {}).get("subtitle_style", {})
+        merged_subtitle_style = {**task_subtitle_style, **clip_subtitle_style}
+        if font_size_param is not None:
+            try:
+                merged_subtitle_style["font_size"] = max(8, int(font_size_param))
+            except ValueError:
+                pass
+
+        from ...ass_generator import generate_ass_content, AVAILABLE_TEMPLATES, DEFAULT_TEMPLATE
+        if template not in AVAILABLE_TEMPLATES:
+            template = DEFAULT_TEMPLATE
+
+        ass_content = generate_ass_content(
+            words=words,
+            subtitle_style=merged_subtitle_style or None,
+            template=template,
+            time_offset_ms=time_offset_ms,
+        )
+
+        return {
+            "clip_id": clip_id,
+            "task_id": task_id,
+            "template": template,
+            "ass_content": ass_content,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating ASS for clip {clip_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error generating ASS: {str(e)}")
+
+
 @router.delete("/{task_id}/clips/{clip_id}")
 async def delete_clip(task_id: str, clip_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Delete a specific clip."""
     try:
-        headers = request.headers
-        user_id = headers.get("user_id")
-
-        if not user_id:
-            raise HTTPException(status_code=401, detail="User authentication required")
+        user_id = _require_user_id(request)
 
         task_service = TaskService(db)
 
@@ -90,9 +231,7 @@ async def retry_clips_generation(task_id: str, request: Request, db: AsyncSessio
     Deletes existing clips, re-runs AI analysis on the transcript,
     and creates new clip records for user review.
     """
-    user_id = request.headers.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         task_service = TaskService(db)
@@ -123,20 +262,12 @@ async def retry_clips_generation(task_id: str, request: Request, db: AsyncSessio
             db, task_id, "processing", progress=55, progress_message="Re-analyzing transcript with AI for new clips..."
         )
 
-        # Extract prompt_id and clips_count from task metadata for the retry
-        task_metadata = task.get("metadata") or {}
-        retry_prompt_id = task_metadata.get("prompt_id")
-        retry_clips_count = task_metadata.get("clips_count")
-
         # Enqueue job for AI analysis and clip creation (without re-transcribing)
+        # All config (prompt_id, clips_count, ai_provider) is fetched from DB by the worker
         from ...workers.job_queue import JobQueue
         job_id = await JobQueue.enqueue_job(
             "retry_clips_analysis",
             task_id,
-            user_id,
-            transcript,
-            retry_prompt_id,
-            retry_clips_count,
             queue_name=config.arq_queue_name,
         )
 
@@ -153,14 +284,48 @@ async def retry_clips_generation(task_id: str, request: Request, db: AsyncSessio
         raise HTTPException(status_code=500, detail=f"Error starting clip retry: {str(e)}")
 
 
+@router.post("/{task_id}/reopen")
+async def reopen_task(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Reset a completed task back to awaiting_review so the user can edit and regenerate clips."""
+    user_id = _require_user_id(request)
+
+    try:
+        task_service = TaskService(db)
+        task = await task_service.task_repo.get_task_by_id(db, task_id)
+
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to access this task")
+
+        if task.get("status") != "completed":
+            raise HTTPException(status_code=400, detail="Only completed tasks can be reopened")
+
+        await task_service.task_repo.update_task_status(
+            db, task_id, "awaiting_review", progress=100, progress_message="Reopened for editing"
+        )
+
+        return {"message": "Task reopened", "task_id": task_id, "status": "awaiting_review"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error reopening task: {e}")
+        raise HTTPException(status_code=500, detail=f"Error reopening task: {str(e)}")
+
+
 @router.post("/{task_id}/generate-clips")
 async def generate_clips_from_transcript(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Generate video files from reviewed clip records and enqueue for processing."""
-    user_id = request.headers.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
+        # Parse optional body
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
         task_service = TaskService(db)
         task = await task_service.task_repo.get_task_by_id(db, task_id)
 
@@ -177,6 +342,30 @@ async def generate_clips_from_transcript(task_id: str, request: Request, db: Asy
         clips = await task_service.clip_repo.get_clips_by_task(db, task_id)
         if not clips:
             raise HTTPException(status_code=400, detail="No clips found for this task")
+
+        # Merge body options into task metadata
+        from ...pycaps_renderer import AVAILABLE_TEMPLATES as _PYCAPS_TEMPLATES
+        VALID_RATIOS = {"9:16", "1:1", "16:9"}
+        metadata_updates: dict = {}
+        if "transitions_enabled" in body:
+            metadata_updates["transitions_enabled"] = bool(body["transitions_enabled"])
+        if "aspect_ratio" in body and body["aspect_ratio"] in VALID_RATIOS:
+            metadata_updates["aspect_ratio"] = body["aspect_ratio"]
+        if "subtitle_style" in body and isinstance(body["subtitle_style"], dict):
+            from ...subtitle_style import normalize_subtitle_style
+            metadata_updates["subtitle_style"] = normalize_subtitle_style(body["subtitle_style"])
+        if "pycaps_template" in body and body["pycaps_template"] in _PYCAPS_TEMPLATES:
+            metadata_updates["pycaps_template"] = body["pycaps_template"]
+
+        if metadata_updates:
+            existing_metadata = task.get("metadata") or {}
+            existing_metadata.update(metadata_updates)
+            await db.execute(
+                text("UPDATE tasks SET task_metadata = CAST(:metadata AS jsonb), updated_at = NOW() WHERE id = :task_id"),
+                {"metadata": json.dumps(existing_metadata), "task_id": task_id},
+            )
+            await db.commit()
+            logger.info(f"Updated task metadata for {task_id}: {metadata_updates}")
 
         # Update task status to processing
         await task_service.task_repo.update_task_status(
@@ -214,9 +403,7 @@ async def update_clip_transcript(
     db: AsyncSession = Depends(get_db)
 ):
     """Update the transcript text for a specific clip."""
-    user_id = request.headers.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         data = await request.json()
@@ -269,9 +456,7 @@ async def update_clip_time(
     db: AsyncSession = Depends(get_db)
 ):
     """Update the start/end time for a specific clip and auto-extract transcript for the new time range."""
-    user_id = request.headers.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         data = await request.json()
@@ -362,3 +547,184 @@ async def update_clip_time(
     except Exception as e:
         logger.error(f"Error updating clip time: {e}")
         raise HTTPException(status_code=500, detail=f"Error updating clip time: {str(e)}")
+
+
+@router.put("/{task_id}/clips/{clip_id}/template")
+async def update_clip_template(
+    task_id: str,
+    clip_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Update the pycaps template for a specific clip."""
+    user_id = _require_user_id(request)
+
+    try:
+        data = await request.json()
+        pycaps_template = data.get("pycaps_template")
+        if not pycaps_template:
+            raise HTTPException(status_code=400, detail="pycaps_template is required")
+
+        from ...pycaps_renderer import AVAILABLE_TEMPLATES
+        if pycaps_template not in AVAILABLE_TEMPLATES:
+            raise HTTPException(status_code=400, detail=f"Unknown template: {pycaps_template}")
+
+        task_service = TaskService(db)
+
+        task = await task_service.task_repo.get_task_by_id(db, task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+
+        clip = await task_service.clip_repo.get_clip_by_id(db, clip_id)
+        if not clip:
+            raise HTTPException(status_code=404, detail="Clip not found")
+        if clip["task_id"] != task_id:
+            raise HTTPException(status_code=404, detail="Clip not found in this task")
+
+        # Clear any previously rendered file since template changed
+        await task_service.clip_repo.update_clip(
+            db, clip_id, {"pycaps_template": pycaps_template, "rendered_file_path": None}
+        )
+
+        return {"message": "Clip template updated", "pycaps_template": pycaps_template}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating clip template: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{task_id}/clips/{clip_id}/render")
+async def render_clip(
+    task_id: str,
+    clip_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Render a clip with pycaps subtitles burned in (on-demand export).
+
+    Body (optional):
+        { "pycaps_template": "word-focus" }
+    If not provided, uses the clip's stored template.
+    """
+    user_id = _require_user_id(request)
+
+    try:
+        data = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    except Exception:
+        data = {}
+
+    # Parse aspect_ratio from request body
+    aspect_ratio = data.get("aspect_ratio")
+    RATIO_MAP = {"9:16": 9/16, "1:1": 1.0, "16:9": 16/9}
+    target_ratio = RATIO_MAP.get(aspect_ratio) if aspect_ratio else None
+
+    try:
+        task_service = TaskService(db)
+
+        # Verify ownership
+        task = await task_service.task_repo.get_task_by_id(db, task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+
+        if task.get("status") != "completed":
+            raise HTTPException(status_code=400, detail="Task is not completed yet")
+
+        # Get full clip data
+        clips = await task_service.clip_repo.get_clips_by_task(db, task_id)
+        clip_data = next((c for c in clips if c["id"] == clip_id), None)
+        if not clip_data:
+            raise HTTPException(status_code=404, detail="Clip not found")
+
+        raw_clip_path = Path(clip_data["file_path"])
+        if not raw_clip_path.exists():
+            raise HTTPException(status_code=404, detail="Clip video file not found on disk")
+
+        # Determine template
+        template = data.get("pycaps_template") or clip_data.get("pycaps_template") or "word-focus"
+
+        # Get caption options for RTL and custom font support
+        caption_options = data.get("caption_options") or {}
+
+        # Merge subtitle_style: task metadata baseline + per-request overrides
+        task_metadata = task.get("metadata") or {}
+        task_subtitle_style = task_metadata.get("subtitle_style", {})
+        request_subtitle_style = caption_options.get("subtitle_style", {})
+        merged_subtitle_style = {**task_subtitle_style, **request_subtitle_style}
+        if merged_subtitle_style:
+            caption_options["subtitle_style"] = merged_subtitle_style
+
+        from ...ass_generator import generate_ass_content, AVAILABLE_TEMPLATES as ASS_TEMPLATES, DEFAULT_TEMPLATE as ASS_DEFAULT
+        if template not in ASS_TEMPLATES:
+            template = ASS_DEFAULT
+
+        # Build ASS subtitle content from stored word-level data
+        words = clip_data.get("words", [])
+        if not words:
+            raise HTTPException(status_code=400, detail="No word-level timing data for this clip")
+
+        ass_content = generate_ass_content(
+            words=words,
+            subtitle_style=merged_subtitle_style or None,
+            template=template,
+        )
+
+        # Crop clip to target aspect ratio if specified
+        input_for_rendering = raw_clip_path
+        if target_ratio:
+            cropped_filename = f"cropped_{clip_id}_{aspect_ratio.replace(':', '')}.mp4"
+            cropped_path = Path(config.temp_dir) / "clips" / cropped_filename
+
+            from ...utils.async_helpers import run_in_thread
+            from ...video_utils import crop_clip_to_ratio
+
+            clip_duration = clip_data.get("duration", 0)
+            crop_success = await run_in_thread(
+                crop_clip_to_ratio, raw_clip_path, cropped_path, target_ratio, 0, clip_duration
+            )
+
+            if not crop_success:
+                raise HTTPException(status_code=500, detail="Failed to crop clip to target aspect ratio")
+
+            input_for_rendering = cropped_path
+            rendered_filename = f"rendered_{clip_id}_{template}_{aspect_ratio.replace(':', '')}.mp4"
+        else:
+            rendered_filename = f"rendered_{clip_id}_{template}.mp4"
+        rendered_path = Path(config.temp_dir) / "clips" / rendered_filename
+
+        # Burn ASS subtitles with ffmpeg (same ASS file as the browser preview)
+        from ...utils.async_helpers import run_in_thread
+        from ...ass_renderer import burn_ass_subtitles
+        success = await run_in_thread(
+            burn_ass_subtitles, input_for_rendering, rendered_path, ass_content
+        )
+
+        if not success:
+            raise HTTPException(status_code=500, detail="Subtitle rendering failed")
+
+        # Store the rendered path and template in DB
+        await task_service.clip_repo.update_clip(
+            db, clip_id,
+            {
+                "rendered_file_path": str(rendered_path),
+                "pycaps_template": template,
+            },
+        )
+
+        return {
+            "message": "Clip rendered successfully",
+            "clip_id": clip_id,
+            "template": template,
+            "rendered_url": f"/clips/{rendered_filename}",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error rendering clip {clip_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error rendering clip: {str(e)}")

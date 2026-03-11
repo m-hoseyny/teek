@@ -24,6 +24,7 @@ from .api.routes import settings
 from .api.routes import subscriptions
 from .api.routes import tasks_clips
 from .api.routes import tasks_transcripts
+from .api.routes import auth as auth_routes
 
 # Ensure the log directory exists before configuring file logging.
 log_dir = Path("logs")
@@ -71,7 +72,8 @@ app = FastAPI(
     title="Teek API",
     description="Refactored Python backend for Teek with async job processing",
     version="0.2.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    redirect_slashes=False,
 )
 
 # CORS middleware
@@ -88,7 +90,8 @@ clips_dir = Path(config.temp_dir) / "clips"
 clips_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/clips", StaticFiles(directory=str(clips_dir)), name="clips")
 
-# Include routers - settings first to avoid shadowing by tasks/{task_id} catch-all
+# Include routers - auth first, then settings (to avoid shadowing by tasks/{task_id} catch-all)
+app.include_router(auth_routes.router)
 app.include_router(settings.router)
 app.include_router(tasks.router)
 app.include_router(subscriptions.router)

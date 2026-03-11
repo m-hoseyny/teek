@@ -244,7 +244,8 @@ async def start_task(request: Request):
                         text=clip_info["text"],
                         relevance_score=clip_info["relevance_score"],
                         reasoning=clip_info["reasoning"],
-                        clip_order=i + 1
+                        clip_order=i + 1,
+                        thumbnail_filename=clip_info.get("thumbnail_filename"),
                     )
                     db.add(clip_record)
                     await db.flush()
@@ -435,7 +436,8 @@ async def process_video_task(task_id: str, raw_source: dict, user_id: str, font_
                         text=clip_info["text"],
                         relevance_score=clip_info["relevance_score"],
                         reasoning=clip_info["reasoning"],
-                        clip_order=i + 1
+                        clip_order=i + 1,
+                        thumbnail_filename=clip_info.get("thumbnail_filename"),
                     )
                     db.add(clip_record)
                     await db.flush()
@@ -474,7 +476,8 @@ async def get_task_clips(task_id: str, db: AsyncSession = Depends(get_db)):
     clips_result = await db.execute(
       text("""
         SELECT id, filename, file_path, start_time, end_time, duration,
-               text, relevance_score, reasoning, clip_order, created_at
+               text, relevance_score, reasoning, clip_order, created_at,
+               thumbnail_filename
         FROM generated_clips
         WHERE task_id = :task_id
         ORDER BY clip_order ASC
@@ -498,7 +501,8 @@ async def get_task_clips(task_id: str, db: AsyncSession = Depends(get_db)):
         "reasoning": clip.reasoning,
         "clip_order": clip.clip_order,
         "created_at": clip.created_at.isoformat(),
-        "video_url": f"/clips/{clip.filename}"  # URL for frontend to access the clip
+        "video_url": f"/clips/{clip.filename}",
+        "thumbnail_filename": clip.thumbnail_filename,
       }
       clips_data.append(clip_data)
 

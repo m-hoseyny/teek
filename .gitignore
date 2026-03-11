@@ -11,3 +11,7 @@ backend/clips/
 backend/.cache/
 backend/models/
 backend/downloads/
+docs/
+design/
+.vscode/
+.claude/

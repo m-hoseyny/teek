@@ -2,6 +2,7 @@
 Task API routes using refactored architecture.
 """
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 from typing import Optional, Any, Dict
@@ -15,7 +16,7 @@ from ...repositories.prompt_repository import PromptRepository
 from ...workers.job_queue import JobQueue
 from ...workers.progress import ProgressTracker
 from ...config import Config
-from ...subtitle_style import normalize_subtitle_style
+from ...pycaps_renderer import AVAILABLE_TEMPLATES as PYCAPS_AVAILABLE_TEMPLATES, DEFAULT_TEMPLATE as PYCAPS_DEFAULT_TEMPLATE
 from .utils import (
     _require_user_id,
     _require_admin_access,
@@ -46,16 +47,12 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
 
-@router.get("/")
+@router.get("")
 async def list_tasks(request: Request, db: AsyncSession = Depends(get_db), limit: int = 50):
     """
     Get all tasks for the authenticated user.
     """
-    headers = request.headers
-    user_id = headers.get("user_id")
-
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         task_service = TaskService(db)
@@ -71,12 +68,73 @@ async def list_tasks(request: Request, db: AsyncSession = Depends(get_db), limit
         raise HTTPException(status_code=500, detail=f"Error retrieving tasks: {str(e)}")
 
 
+@router.get("/dashboard")
+async def get_dashboard_stats(request: Request, db: AsyncSession = Depends(get_db)):
+    """Get dashboard stats for the authenticated user."""
+    user_id = _require_user_id(request)
+
+    try:
+        stats_result = await db.execute(
+            text("""
+                SELECT
+                    COUNT(DISTINCT t.id) AS total_tasks,
+                    COUNT(gc.id) AS total_clips,
+                    COALESCE(AVG(gc.relevance_score), 0) AS avg_virality_score
+                FROM tasks t
+                LEFT JOIN generated_clips gc ON t.id = gc.task_id
+                WHERE t.user_id = :user_id
+            """),
+            {"user_id": user_id},
+        )
+        stats_row = stats_result.fetchone()
+
+        total_tasks = int(stats_row.total_tasks or 0)
+        total_clips = int(stats_row.total_clips or 0)
+        avg_virality = float(stats_row.avg_virality_score or 0)
+
+        recent_result = await db.execute(
+            text("""
+                SELECT t.id, COALESCE(s.title, '') AS title, t.status, t.created_at,
+                       COUNT(gc.id) AS clips_count,
+                       COALESCE(AVG(gc.relevance_score), 0) AS avg_virality
+                FROM tasks t
+                LEFT JOIN sources s ON t.source_id = s.id
+                LEFT JOIN generated_clips gc ON t.id = gc.task_id
+                WHERE t.user_id = :user_id
+                GROUP BY t.id, s.title
+                ORDER BY t.created_at DESC
+                LIMIT 5
+            """),
+            {"user_id": user_id},
+        )
+
+        recent_tasks = []
+        for row in recent_result.fetchall():
+            recent_tasks.append({
+                "id": str(row.id),
+                "title": row.title or f"Task {str(row.id)[:8]}",
+                "status": row.status,
+                "clips_count": int(row.clips_count),
+                "avg_virality": round(float(row.avg_virality), 1),
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            })
+
+        return {
+            "total_tasks": total_tasks,
+            "total_clips": total_clips,
+            "avg_virality_score": round(avg_virality, 1),
+            "recent_tasks": recent_tasks,
+        }
+
+    except Exception as e:
+        logger.error(f"Error fetching dashboard stats: {e}")
+        raise HTTPException(status_code=500, detail=f"Error fetching dashboard stats: {str(e)}")
+
+
 @router.get("/prompts")
 async def list_prompts(request: Request):
     """Get all available prompt templates for clip generation."""
-    user_id = request.headers.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         prompts = PromptRepository.get_prompt_choices()
@@ -92,28 +150,25 @@ async def list_prompts(request: Request):
         raise HTTPException(status_code=500, detail=f"Error listing prompts: {str(e)}")
 
 
-@router.post("/")
+@router.post("")
 async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
     """
     Create a new task and enqueue it for processing.
     Returns task_id immediately.
     """
     data = await request.json()
-    headers = request.headers
+    user_id = _require_user_id(request)
 
     raw_source = data.get("source")
-    user_id = headers.get("user_id")
 
-    # Get and normalize subtitle options
-    font_options = data.get("font_options", {})
-    if not isinstance(font_options, dict):
-        font_options = {}
-    subtitle_style = normalize_subtitle_style(font_options)
-    font_family = subtitle_style["font_family"]
-    font_size = subtitle_style["font_size"]
-    font_color = subtitle_style["font_color"]
-    transitions_enabled = _coerce_bool(font_options.get("transitions_enabled"), default=False)
-    transcript_review_enabled = _coerce_bool(font_options.get("transcript_review_enabled"), default=False)
+    # Get pycaps options from caption_options (or legacy font_options for backwards compat)
+    caption_options = data.get("caption_options") or data.get("font_options") or {}
+    if not isinstance(caption_options, dict):
+        caption_options = {}
+    raw_template = caption_options.get("pycaps_template", PYCAPS_DEFAULT_TEMPLATE)
+    pycaps_template = raw_template if raw_template in PYCAPS_AVAILABLE_TEMPLATES else PYCAPS_DEFAULT_TEMPLATE
+    transitions_enabled = _coerce_bool(caption_options.get("transitions_enabled"), default=False)
+    transcript_review_enabled = _coerce_bool(caption_options.get("transcript_review_enabled"), default=False)
 
     # Resolve transcription options
     transcription_options = data.get("transcription_options", {})
@@ -130,7 +185,7 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
         }
     else:
         transcription_provider = _resolve_transcription_provider(
-            transcription_options.get("provider", "local")
+            transcription_options.get("provider", "assemblyai")
         )
 
     transcription_runtime_options = _resolve_transcription_runtime_options(
@@ -143,9 +198,6 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
 
     if not raw_source or not raw_source.get("url"):
         raise HTTPException(status_code=400, detail="Source URL is required")
-
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
 
     try:
         task_service = TaskService(db)
@@ -191,18 +243,17 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
             user_id=user_id,
             url=raw_source["url"],
             title=raw_source.get("title"),
-            font_family=font_family,
-            font_size=font_size,
-            font_color=font_color,
+            pycaps_template=pycaps_template,
+            transitions_enabled=transitions_enabled,
             transcription_provider=transcription_provider,
             ai_provider=ai_options.provider,
+            ai_model=ai_options.model,
+            ai_routing_mode=resolved_zai_routing_mode,
             transcript_review_enabled=transcript_review_enabled,
+            transcription_options=transcription_runtime_options,
             prompt_id=ai_options.prompt_id,
             clips_count=ai_options.clips_count,
         )
-
-        # Get source type for worker
-        source_type = task_service.video_service.determine_source_type(raw_source["url"])
 
         queue_name = (
             config.arq_assembly_queue_name
@@ -210,42 +261,18 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
             else config.arq_local_queue_name
         )
 
-        # Enqueue job for worker
+        # Enqueue job for worker — only task_id needed; all config is in DB
         try:
-            # Build common args (14 positional args shared by both workers)
-            common_args = [
-                task_id,
-                raw_source["url"],
-                source_type,
-                user_id,
-                font_family,
-                font_size,
-                font_color,
-                transitions_enabled,
-                transcription_provider,
-                ai_options.provider,
-                ai_options.model,
-                subtitle_style,
-                resolved_zai_routing_mode,
-                transcription_runtime_options,
-            ]
-
             if transcript_review_enabled:
-                # transcribe_video_task has extra transcript_review_enabled param
                 job_id = await JobQueue.enqueue_job(
                     "transcribe_video_task",
-                    *common_args,
-                    True,  # transcript_review_enabled
-                    ai_options.prompt_id,
-                    ai_options.clips_count,
+                    task_id,
                     queue_name=queue_name,
                 )
             else:
                 job_id = await JobQueue.enqueue_job(
                     "process_video_task",
-                    *common_args,
-                    ai_options.prompt_id,
-                    ai_options.clips_count,
+                    task_id,
                     queue_name=queue_name,
                 )
         except Exception as enqueue_error:
@@ -319,12 +346,10 @@ async def cancel_all_tasks(request: Request, db: AsyncSession = Depends(get_db))
         raise HTTPException(status_code=500, detail=f"Error cancelling tasks: {str(e)}")
 
 
-@router.delete("/")
+@router.delete("")
 async def delete_all_user_tasks(request: Request, db: AsyncSession = Depends(get_db)):
     """Delete all tasks for the authenticated user."""
-    user_id = request.headers.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         task_service = TaskService(db)
@@ -341,10 +366,7 @@ async def delete_all_user_tasks(request: Request, db: AsyncSession = Depends(get
 @router.get("/{task_id}")
 async def get_task(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Get task details."""
-    # EventSource in browsers cannot set custom headers, so allow query fallback.
-    user_id = request.headers.get("user_id") or request.query_params.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         task_service = TaskService(db)
@@ -370,10 +392,8 @@ async def get_task_progress_sse(task_id: str, request: Request, db: AsyncSession
     SSE endpoint for real-time progress updates.
     Streams progress updates as Server-Sent Events.
     """
-    # EventSource in browsers cannot set custom headers, so allow query fallback.
-    user_id = request.headers.get("user_id") or request.query_params.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    # EventSource cannot set custom headers, so _require_user_id also checks ?token= query param.
+    user_id = _require_user_id(request)
 
     task_service = TaskService(db)
     task = await task_service.task_repo.get_task_by_id(db, task_id)
@@ -383,9 +403,11 @@ async def get_task_progress_sse(task_id: str, request: Request, db: AsyncSession
     if task["user_id"] != user_id:
         raise HTTPException(status_code=403, detail="Not authorized to access this task")
 
+    TERMINAL_STATUSES = {"completed", "error", "awaiting_review"}
+
     async def event_generator():
         """Generate SSE events for task progress."""
-        # Send initial task status
+        # Send initial task status from DB
         yield {
             "event": "status",
             "data": json.dumps({
@@ -396,8 +418,8 @@ async def get_task_progress_sse(task_id: str, request: Request, db: AsyncSession
             })
         }
 
-        # If task is already completed or error, close connection
-        if task.get("status") in ["completed", "error"]:
+        # If task already reached a terminal state, close immediately
+        if task.get("status") in TERMINAL_STATUSES:
             yield {
                 "event": "close",
                 "data": json.dumps({"status": task.get("status")})
@@ -412,15 +434,21 @@ async def get_task_progress_sse(task_id: str, request: Request, db: AsyncSession
         )
 
         try:
-            # Subscribe to progress updates
+            # subscribe_to_progress checks cached Redis state after subscribing
+            # (fixes race where worker finished before SSE client connected),
+            # and yields None as a heartbeat every ~15 s.
             async for progress_data in ProgressTracker.subscribe_to_progress(redis_client, task_id):
+                if progress_data is None:
+                    # Heartbeat: send an empty comment to keep the connection alive
+                    yield {"event": "heartbeat", "data": "{}"}
+                    continue
+
                 yield {
                     "event": "progress",
                     "data": json.dumps(progress_data)
                 }
 
-                # Close connection if task is done
-                if progress_data.get("status") in ["completed", "error"]:
+                if progress_data.get("status") in TERMINAL_STATUSES:
                     yield {
                         "event": "close",
                         "data": json.dumps({"status": progress_data.get("status")})
@@ -436,11 +464,7 @@ async def get_task_progress_sse(task_id: str, request: Request, db: AsyncSession
 @router.patch("/{task_id}")
 async def update_task(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Update task details (title)."""
-    headers = request.headers
-    user_id = headers.get("user_id")
-
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    user_id = _require_user_id(request)
 
     try:
         data = await request.json()
@@ -470,15 +494,183 @@ async def update_task(task_id: str, request: Request, db: AsyncSession = Depends
         raise HTTPException(status_code=500, detail=f"Error updating task: {str(e)}")
 
 
+@router.post("/{task_id}/retry")
+async def retry_task(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """
+    Retry a failed task.
+    Re-enqueues the task for processing with the same parameters.
+    """
+    user_id = _require_user_id(request)
+
+    try:
+        task_service = TaskService(db)
+        task = await task_service.task_repo.get_task_by_id(db, task_id)
+
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to access this task")
+
+        # Only allow retry from error status
+        if task.get("status") != "error":
+            raise HTTPException(status_code=400, detail="Task can only be retried from error status")
+
+        transcription_provider = task.get("transcription_provider", "assemblyai")
+
+        # Delete existing clips from previous attempt
+        await task_service.clip_repo.delete_clips_by_task(db, task_id)
+
+        # Reset task status to queued for retry
+        await task_service.task_repo.update_task_status(
+            db, task_id, "queued", progress=0, progress_message="Task queued for retry"
+        )
+
+        queue_name = (
+            config.arq_assembly_queue_name
+            if transcription_provider == "assemblyai"
+            else config.arq_local_queue_name
+        )
+
+        # Enqueue job — only task_id needed; all config is fetched from DB by worker
+        transcript_review_enabled = task.get("transcript_review_enabled", False)
+        if transcript_review_enabled:
+            job_id = await JobQueue.enqueue_job(
+                "transcribe_video_task",
+                task_id,
+                queue_name=queue_name,
+            )
+        else:
+            job_id = await JobQueue.enqueue_job(
+                "process_video_task",
+                task_id,
+                queue_name=queue_name,
+            )
+
+        return {
+            "message": "Task retry started",
+            "task_id": task_id,
+            "job_id": job_id,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error starting task retry: {e}")
+        raise HTTPException(status_code=500, detail=f"Error starting task retry: {str(e)}")
+
+
+@router.post("/{task_id}/reopen")
+async def reopen_task(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """
+    Reopen a completed or failed task for review.
+    Returns the task to 'awaiting_review' state so user can change subtitle
+    styles and regenerate clips.
+
+    Smart transcript detection:
+    - If clips + transcript exist: reset to awaiting_review immediately
+    - If transcript exists but no clips: enqueue AI re-analysis
+    - If no transcript: enqueue full pipeline with review stop
+    """
+    user_id = _require_user_id(request)
+
+    try:
+        task_service = TaskService(db)
+        task = await task_service.task_repo.get_task_by_id(db, task_id)
+
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to access this task")
+
+        allowed_statuses = {"error", "completed", "awaiting_review"}
+        if task.get("status") not in allowed_statuses:
+            raise HTTPException(
+                status_code=400,
+                detail="Task can only be reopened from error, completed, or awaiting_review status"
+            )
+
+        transcription_provider = task.get("transcription_provider", "local")
+        transcript = task.get("editable_transcript") or task.get("source_transcript") or ""
+        clips = await task_service.clip_repo.get_clips_by_task(db, task_id)
+
+        if transcript and clips:
+            # All data available: just reset status to awaiting_review
+            await task_service.task_repo.update_task_status(
+                db, task_id, "awaiting_review", progress=70,
+                progress_message="Task reopened for review. Edit settings and regenerate clips."
+            )
+            return {
+                "message": "Task reopened for review",
+                "task_id": task_id,
+                "status": "awaiting_review",
+                "clips_count": len(clips),
+            }
+
+        elif transcript:
+            # Have transcript, need AI analysis to recreate clips
+            await task_service.clip_repo.delete_clips_by_task(db, task_id)
+            await task_service.task_repo.update_task_clips(db, task_id, [])
+            await task_service.task_repo.update_task_status(
+                db, task_id, "processing", progress=55,
+                progress_message="Re-analyzing transcript with AI for new clips..."
+            )
+            job_id = await JobQueue.enqueue_job(
+                "retry_clips_analysis",
+                task_id,
+                queue_name=config.arq_queue_name,
+            )
+            return {
+                "message": "Re-analyzing transcript for clips",
+                "task_id": task_id,
+                "status": "processing",
+                "job_id": job_id,
+            }
+
+        else:
+            # No transcript: full reprocess, stopping at awaiting_review for review
+            await task_service.clip_repo.delete_clips_by_task(db, task_id)
+            await task_service.task_repo.update_task_clips(db, task_id, [])
+
+            # Ensure transcript_review_enabled so the pipeline stops at awaiting_review
+            await db.execute(
+                text("UPDATE tasks SET transcript_review_enabled = true, updated_at = NOW() WHERE id = :task_id"),
+                {"task_id": task_id}
+            )
+            await db.commit()
+
+            queue_name = (
+                config.arq_assembly_queue_name
+                if transcription_provider == "assemblyai"
+                else config.arq_local_queue_name
+            )
+            await task_service.task_repo.update_task_status(
+                db, task_id, "queued", progress=0,
+                progress_message="Task queued for reprocessing"
+            )
+            job_id = await JobQueue.enqueue_job(
+                "transcribe_video_task",
+                task_id,
+                queue_name=queue_name,
+            )
+            return {
+                "message": "Task queued for reprocessing",
+                "task_id": task_id,
+                "status": "queued",
+                "job_id": job_id,
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error reopening task {task_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error reopening task: {str(e)}")
+
+
 @router.delete("/{task_id}")
 async def delete_task(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Delete a task and all its associated clips."""
     try:
-        headers = request.headers
-        user_id = headers.get("user_id")
-
-        if not user_id:
-            raise HTTPException(status_code=401, detail="User authentication required")
+        user_id = _require_user_id(request)
 
         task_service = TaskService(db)
 
@@ -504,69 +696,66 @@ async def delete_task(task_id: str, request: Request, db: AsyncSession = Depends
 
 @router.get("/{task_id}/source-video")
 async def get_task_source_video(task_id: str, request: Request, db: AsyncSession = Depends(get_db)):
-    """Serve the source video file for review."""
-    # EventSource in browsers cannot set custom headers, so allow query fallback.
-    user_id = request.headers.get("user_id") or request.query_params.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User authentication required")
+    """Stream the source video file with HTTP range request support. Publicly accessible via task_id (UUID)."""
+    import re
+    from pathlib import Path
+    from fastapi.responses import StreamingResponse
 
     try:
-        from pathlib import Path
-        from fastapi.responses import FileResponse
-
         task_service = TaskService(db)
         task = await task_service.task_repo.get_task_by_id(db, task_id)
 
         if not task:
-            logger.error(f"Task {task_id} not found")
             raise HTTPException(status_code=404, detail="Task not found")
-        if task["user_id"] != user_id:
-            logger.error(f"User {user_id} not authorized for task {task_id}")
-            raise HTTPException(status_code=403, detail="Not authorized to access this task")
 
-        # Get video path from task metadata
         metadata = task.get("metadata") or {}
         video_path = metadata.get("video_path")
 
-        logger.info(f"Task {task_id}: video_path={video_path}")
-
         if not video_path:
-            logger.error(f"No video_path in metadata for task {task_id}")
             raise HTTPException(status_code=404, detail="Video path not found for this task")
 
         video_file = Path(video_path)
 
-        # Check if downloads directory exists and list its contents
-        downloads_dir = Path("/app/downloads")
-        logger.info(f"Downloads dir exists: {downloads_dir.exists()}")
-        if downloads_dir.exists():
-            try:
-                files = list(downloads_dir.iterdir())
-                logger.info(f"Downloads dir contents: {[str(f.name) for f in files[:10]]}")
-            except Exception as e:
-                logger.error(f"Cannot list downloads dir: {e}")
-
-        logger.info(f"Checking video file: {video_file}, exists={video_file.exists()}, is_file={video_file.is_file()}")
-
-        if not video_file.exists():
-            logger.error(f"Video file does not exist: {video_path}")
+        if not video_file.exists() or not video_file.is_file():
             raise HTTPException(status_code=404, detail="Video file not found")
 
-        if not video_file.is_file():
-            logger.error(f"Video path is not a file: {video_path}")
-            raise HTTPException(status_code=404, detail="Video path is not a file")
-
         file_size = video_file.stat().st_size
-        logger.info(f"Serving video file: {video_file}, size={file_size} bytes")
 
-        return FileResponse(
-            path=str(video_file),
-            media_type="video/mp4",
-            headers={
-                "Accept-Ranges": "bytes",
-                "Cache-Control": "public, max-age=3600",
-            }
-        )
+        range_header = request.headers.get("range")
+
+        start = 0
+        end = file_size - 1
+        status_code = 200
+
+        if range_header:
+            match = re.match(r"bytes=(\d+)-(\d*)", range_header)
+            if match:
+                start = int(match.group(1))
+                end = int(match.group(2)) if match.group(2) else file_size - 1
+                end = min(end, file_size - 1)
+                status_code = 206
+
+        chunk_size = 1024 * 1024  # 1 MB
+
+        async def stream():
+            with open(video_file, "rb") as f:
+                f.seek(start)
+                remaining = end - start + 1
+                while remaining > 0:
+                    data = f.read(min(chunk_size, remaining))
+                    if not data:
+                        break
+                    remaining -= len(data)
+                    yield data
+
+        headers = {
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(end - start + 1),
+            "Cache-Control": "public, max-age=3600",
+        }
+
+        return StreamingResponse(stream(), status_code=status_code, headers=headers, media_type="video/mp4")
 
     except HTTPException:
         raise

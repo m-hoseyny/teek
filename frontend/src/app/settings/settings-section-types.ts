@@ -4,7 +4,7 @@ import {
   type FontStyleOptions,
 } from "@/lib/font-style-options";
 
-export const SETTINGS_SECTIONS = ["font", "video", "transcription", "ai"] as const;
+export const SETTINGS_SECTIONS = ["font", "video", "transcription", "ai", "plan"] as const;
 
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
@@ -37,7 +37,7 @@ export interface UserPreferences extends FontStyleOptions {
 export const DEFAULT_USER_PREFERENCES: UserPreferences = {
   ...DEFAULT_FONT_STYLE_OPTIONS,
   transitionsEnabled: false,
-  transcriptionProvider: "local",
+  transcriptionProvider: "assemblyai",
   whisperChunkingEnabled: true,
   whisperChunkDurationSeconds: 1200,
   whisperChunkOverlapSeconds: 8,
@@ -76,6 +76,10 @@ export const SETTINGS_SECTION_META: Record<SettingsSection, { label: string; des
   ai: {
     label: "AI",
     description: "LLM provider, model, and AI API keys.",
+  },
+  plan: {
+    label: "Plan",
+    description: "Your subscription plan and usage.",
   },
 };
 

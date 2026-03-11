@@ -18,10 +18,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { useSession } from "@/lib/auth-client";
-import { ArrowLeft, Download, Clock, Star, AlertCircle, Trash2, Edit2, X, Check, FileText, Play, Save } from "lucide-react";
+import { useJwt } from "@/contexts/jwt-context";
+import { ArrowLeft, Download, Clock, Star, AlertCircle, Trash2, Edit2, X, Check, FileText, Play, Save, Eye, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import DynamicVideoPlayer, { type VideoPlayerRef } from "@/components/dynamic-video-player";
+import { ClipPreviewModal } from "@/components/clip/ClipPreviewModal";
 
 interface Clip {
   id: string;
@@ -136,12 +137,11 @@ function deriveStageNotesFromMessage(
 export default function TaskPage() {
   const params = useParams();
   const router = useRouter();
-  const { data: session, isPending } = useSession();
+  const { apiFetch, jwt, isReady } = useJwt();
+  const isPending = !isReady;
   const [task, setTask] = useState<TaskDetails | null>(null);
   const [clips, setClips] = useState<Clip[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [sourceVideoUrl, setSourceVideoUrl] = useState<string | null>(null);
-  const [isLoadingSourceVideo, setIsLoadingSourceVideo] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [progressMessage, setProgressMessage] = useState("");
@@ -153,6 +153,13 @@ export default function TaskPage() {
   const [editingClipId, setEditingClipId] = useState<string | null>(null);
   const [editedClipData, setEditedClipData] = useState<{ start_time: string; end_time: string; text: string }>({ start_time: "", end_time: "", text: "" });
   const [isSavingClip, setIsSavingClip] = useState(false);
+  const [previewClipId, setPreviewClipId] = useState<string | null>(null);
+  const [selectedClipData, setSelectedClipData] = useState<{ startTime: string; endTime: string; text: string } | null>(null);
+
+  const handlePreviewSubtitles = (clip: { id: string; start_time: string; end_time: string; text?: string }) => {
+    setPreviewClipId(clip.id);
+    setSelectedClipData({ startTime: clip.start_time, endTime: clip.end_time, text: clip.text || "" });
+  };
 
   const handleEditClip = (clip: Clip, elementId?: string) => {
     setEditingClipId(clip.id);
@@ -173,16 +180,16 @@ export default function TaskPage() {
   };
 
   const handleSaveClip = async (clipId: string) => {
-    if (!userId || !taskId) return;
-    
+    if (!jwt || !taskId) return;
+
     try {
       setIsSavingClip(true);
       setTranscriptError(null);
-      
+
       // Save time - backend will automatically extract transcript for the new time range
-      const timeResponse = await fetch(`${apiUrl}/tasks/${taskId}/clips/${clipId}/time`, {
+      const timeResponse = await apiFetch(`${apiUrl}/tasks/${taskId}/clips/${clipId}/time`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", user_id: userId },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           start_time: editedClipData.start_time, 
           end_time: editedClipData.end_time 
@@ -238,16 +245,14 @@ export default function TaskPage() {
   const sourcePlayerRef = useRef<VideoPlayerRef | null>(null);
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
   const taskId = Array.isArray(params.id) ? params.id[0] : params.id;
-  const userId = session?.user?.id;
+  const sourceVideoUrl = task?.source_video_url ? `${apiUrl}${task.source_video_url}` : null;
 
   // Fetch transcript when task is in awaiting_review status
   const fetchTranscript = useCallback(async () => {
-    if (!taskId || !userId) return;
+    if (!taskId || !jwt) return;
 
     try {
-      const response = await fetch(`${apiUrl}/tasks/${taskId}/transcript`, {
-        headers: { user_id: userId },
-      });
+      const response = await apiFetch(`${apiUrl}/tasks/${taskId}/transcript`);
 
       if (!response.ok) {
         throw new Error(`Failed to fetch transcript: ${response.status}`);
@@ -260,7 +265,7 @@ export default function TaskPage() {
       console.error("Error fetching transcript:", err);
       setTranscriptError(err instanceof Error ? err.message : "Failed to load transcript");
     }
-  }, [apiUrl, taskId, userId]);
+  }, [apiUrl, taskId, jwt, apiFetch]);
 
   // Fetch transcript when task status changes to awaiting_review or completed
   useEffect(() => {
@@ -268,43 +273,6 @@ export default function TaskPage() {
       fetchTranscript();
     }
   }, [task?.status, fetchTranscript]);
-
-  // Fetch source video URL when task is in review or completed status
-  const fetchSourceVideo = useCallback(async () => {
-    if (!taskId || !userId) return;
-    
-    try {
-      setIsLoadingSourceVideo(true);
-      const response = await fetch(`${apiUrl}/tasks/${taskId}/source-video`, {
-        headers: { user_id: userId },
-      });
-      
-      if (!response.ok) {
-        if (response.status === 404) {
-          setSourceVideoUrl(null);
-          return;
-        }
-        throw new Error(`Failed to fetch source video: ${response.status}`);
-      }
-      
-      // Create blob URL from the video data so auth headers are properly used
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      setSourceVideoUrl(url);
-    } catch (err) {
-      console.error("Error fetching source video:", err);
-      setSourceVideoUrl(null);
-    } finally {
-      setIsLoadingSourceVideo(false);
-    }
-  }, [apiUrl, taskId, userId]);
-
-  // Fetch source video when task status changes
-  useEffect(() => {
-    if (task?.status === "awaiting_review" || task?.status === "transcribed" || task?.status === "completed") {
-      fetchSourceVideo();
-    }
-  }, [task?.status, fetchSourceVideo]);
 
   useEffect(() => {
     progressRef.current = progress;
@@ -319,16 +287,10 @@ export default function TaskPage() {
   }, [task?.source_type]);
 
   const fetchTaskStatus = useCallback(async (retryCount = 0, maxRetries = 5) => {
-    if (!taskId || !userId) return false;
+    if (!taskId || !jwt) return false;
 
     try {
-      const headers: HeadersInit = {
-        user_id: userId,
-      };
-
-      const taskResponse = await fetch(`${apiUrl}/tasks/${taskId}`, {
-        headers,
-      });
+      const taskResponse = await apiFetch(`${apiUrl}/tasks/${taskId}`);
 
       // Handle 404 with retry logic (task might not be persisted yet)
       if (taskResponse.status === 404 && retryCount < maxRetries) {
@@ -356,9 +318,7 @@ export default function TaskPage() {
 
       // Only fetch clips if task is completed
       if (taskData.status === "completed") {
-        const clipsResponse = await fetch(`${apiUrl}/tasks/${taskId}/clips`, {
-          headers,
-        });
+        const clipsResponse = await apiFetch(`${apiUrl}/tasks/${taskId}/clips`);
 
         if (!clipsResponse.ok) {
           throw new Error(`Failed to fetch clips: ${clipsResponse.status}`);
@@ -376,11 +336,11 @@ export default function TaskPage() {
       setError(err instanceof Error ? err.message : "Failed to load task");
       return false;
     }
-  }, [apiUrl, taskId, userId]);
+  }, [apiUrl, taskId, jwt, apiFetch]);
 
   // Initial fetch
   useEffect(() => {
-    if (!taskId || !userId) {
+    if (!taskId || !jwt) {
       setIsLoading(false);
       return;
     }
@@ -395,11 +355,11 @@ export default function TaskPage() {
     };
 
     fetchTaskData();
-  }, [fetchTaskStatus, taskId, userId]);
+  }, [fetchTaskStatus, taskId, jwt]);
 
   // Poll task status while queued/processing.
   useEffect(() => {
-    if (!taskId || !userId || !task?.status) return;
+    if (!taskId || !jwt || !task?.status) return;
     if (task.status !== "queued" && task.status !== "processing") return;
 
     const intervalId = window.setInterval(() => {
@@ -412,14 +372,14 @@ export default function TaskPage() {
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [fetchTaskStatus, task?.status, taskId, userId]);
+  }, [fetchTaskStatus, task?.status, taskId, jwt]);
 
   // Subscribe to backend SSE progress stream for real-time updates.
   useEffect(() => {
-    if (!taskId || !userId || !task?.status) return;
+    if (!taskId || !jwt || !task?.status) return;
     if (task.status !== "queued" && task.status !== "processing") return;
 
-    const progressUrl = `${apiUrl}/tasks/${taskId}/progress?user_id=${encodeURIComponent(userId)}`;
+    const progressUrl = `/api/tasks/${taskId}/progress`;
     const eventSource = new EventSource(progressUrl);
 
     const handleStatusOrProgress = (event: MessageEvent) => {
@@ -460,6 +420,10 @@ export default function TaskPage() {
         }
         if (typeof data.status === "string") {
           setTask((prev) => (prev ? { ...prev, status: data.status } : prev));
+          // When the task enters awaiting_review, fetch the full task so clips are loaded
+          if (data.status === "awaiting_review") {
+            fetchTaskStatus();
+          }
         }
       } catch (err) {
         console.error("Failed to parse progress event:", err);
@@ -485,7 +449,7 @@ export default function TaskPage() {
       eventSource.removeEventListener("close", handleClose);
       eventSource.close();
     };
-  }, [apiUrl, fetchTaskStatus, task?.status, taskId, userId]);
+  }, [apiUrl, fetchTaskStatus, task?.status, taskId, jwt]);
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -540,15 +504,12 @@ export default function TaskPage() {
   };
 
   const handleEditTitle = async () => {
-    if (!editedTitle.trim() || !session?.user?.id || !params.id) return;
+    if (!editedTitle.trim() || !jwt || !params.id) return;
 
     try {
-      const response = await fetch(`${apiUrl}/tasks/${params.id}`, {
+      const response = await apiFetch(`${apiUrl}/tasks/${params.id}`, {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          user_id: session.user.id,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: editedTitle }),
       });
 
@@ -565,15 +526,12 @@ export default function TaskPage() {
   };
 
   const handleDeleteTask = async () => {
-    if (!session?.user?.id || !params.id) return;
+    if (!jwt || !params.id) return;
 
     setIsDeleting(true);
     try {
-      const response = await fetch(`${apiUrl}/tasks/${params.id}`, {
+      const response = await apiFetch(`${apiUrl}/tasks/${params.id}`, {
         method: "DELETE",
-        headers: {
-          user_id: session.user.id,
-        },
       });
 
       if (response.ok) {
@@ -591,18 +549,15 @@ export default function TaskPage() {
   };
 
   const handleSaveTranscript = async () => {
-    if (!session?.user?.id || !taskId) return;
+    if (!jwt || !taskId) return;
 
     try {
       setIsSavingTranscript(true);
       setTranscriptError(null);
 
-      const response = await fetch(`${apiUrl}/tasks/${taskId}/transcript`, {
+      const response = await apiFetch(`${apiUrl}/tasks/${taskId}/transcript`, {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          user_id: session.user.id,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ transcript: editedTranscript }),
       });
 
@@ -622,7 +577,7 @@ export default function TaskPage() {
   };
 
   const handleGenerateClips = async () => {
-    if (!session?.user?.id || !taskId) return;
+    if (!jwt || !taskId) return;
 
     try {
       setIsGeneratingClips(true);
@@ -633,11 +588,8 @@ export default function TaskPage() {
         await handleSaveTranscript();
       }
 
-      const response = await fetch(`${apiUrl}/tasks/${taskId}/generate-clips`, {
+      const response = await apiFetch(`${apiUrl}/tasks/${taskId}/generate-clips`, {
         method: "POST",
-        headers: {
-          user_id: session.user.id,
-        },
       });
 
       if (!response.ok) {
@@ -656,19 +608,43 @@ export default function TaskPage() {
   };
 
   const [isRetrying, setIsRetrying] = useState(false);
+  const [isReopening, setIsReopening] = useState(false);
+
+  const handleReopenTask = async () => {
+    if (!jwt || !taskId) return;
+
+    try {
+      setIsReopening(true);
+      setTranscriptError(null);
+
+      const response = await apiFetch(`${apiUrl}/tasks/${taskId}/reopen`, {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({} as { detail?: string }));
+        throw new Error(errorData.detail || "Failed to reopen task");
+      }
+
+      // Refresh task status - will show review page or progress depending on result
+      await fetchTaskStatus();
+    } catch (err) {
+      console.error("Error reopening task:", err);
+      setTranscriptError(err instanceof Error ? err.message : "Failed to reopen task");
+    } finally {
+      setIsReopening(false);
+    }
+  };
 
   const handleRetryGenerateClips = async () => {
-    if (!session?.user?.id || !taskId) return;
+    if (!jwt || !taskId) return;
 
     try {
       setIsRetrying(true);
       setTranscriptError(null);
 
-      const response = await fetch(`${apiUrl}/tasks/${taskId}/retry-clips`, {
+      const response = await apiFetch(`${apiUrl}/tasks/${taskId}/retry-clips`, {
         method: "POST",
-        headers: {
-          user_id: session.user.id,
-        },
       });
 
       if (!response.ok) {
@@ -688,11 +664,8 @@ export default function TaskPage() {
 
   const handleDeleteClip = async (clipId: string) => {
     try {
-      const response = await fetch(`${apiUrl}/tasks/${params.id}/clips/${clipId}`, {
+      const response = await apiFetch(`${apiUrl}/tasks/${params.id}/clips/${clipId}`, {
         method: "DELETE",
-        headers: {
-          user_id: session.user.id,
-        },
       });
 
       if (response.ok) {
@@ -1037,13 +1010,40 @@ export default function TaskPage() {
                 <AlertCircle className="w-12 h-12 mx-auto mb-2" />
                 <h2 className="text-xl font-semibold">Processing Failed</h2>
               </div>
-              <p className="text-gray-600 mb-4">There was an error processing your video. Please try again.</p>
-              <Link href="/">
-                <Button>
-                  <ArrowLeft className="w-4 h-4" />
-                  Back to Home
+              <p className="text-gray-600 mb-4">
+                {task.progress_message || "There was an error processing your video."}
+              </p>
+              {transcriptError && (
+                <Alert className="mb-4 text-left border-red-200 bg-red-50">
+                  <AlertCircle className="h-4 w-4 text-red-500" />
+                  <AlertDescription className="text-sm text-red-700">{transcriptError}</AlertDescription>
+                </Alert>
+              )}
+              <div className="flex justify-center gap-3">
+                <Button
+                  onClick={handleReopenTask}
+                  disabled={isReopening}
+                  className="bg-blue-600 hover:bg-blue-700"
+                >
+                  {isReopening ? (
+                    <>
+                      <div className="w-4 h-4 mr-2 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Retrying...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="w-4 h-4 mr-2" />
+                      Retry
+                    </>
+                  )}
                 </Button>
-              </Link>
+                <Link href="/">
+                  <Button variant="outline">
+                    <ArrowLeft className="w-4 h-4 mr-2" />
+                    Back to Home
+                  </Button>
+                </Link>
+              </div>
             </CardContent>
           </Card>
         ) : task?.status === "awaiting_review" || task?.status === "transcribed" ? (
@@ -1285,7 +1285,7 @@ export default function TaskPage() {
                           )}
 
                           <div className="flex flex-wrap gap-2">
-                            {task?.source_video_url && (
+                            {sourceVideoUrl && (
                               <>
                                 <Button
                                   size="sm"
@@ -1304,6 +1304,17 @@ export default function TaskPage() {
                                   Play Clip Segment
                                 </Button>
                               </>
+                            )}
+                            {sourceVideoUrl && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="border-blue-300 text-blue-700 hover:bg-blue-50"
+                                onClick={() => handlePreviewSubtitles(clip)}
+                              >
+                                <Eye className="w-4 h-4 mr-2" />
+                                Preview Subtitles
+                              </Button>
                             )}
                           </div>
                         </>
@@ -1408,7 +1419,7 @@ export default function TaskPage() {
         ) : (
           <div className="grid gap-6">
             {/* Source Video Player with Clip Sync */}
-            {task?.source_video_url && (
+            {sourceVideoUrl && (
               <Card className="border-gray-200 overflow-hidden">
                 <CardContent className="p-0">
                   <div className="p-4 bg-gray-50 border-b border-gray-200">
@@ -1423,7 +1434,7 @@ export default function TaskPage() {
                   <div className="bg-black">
                     <DynamicVideoPlayer
                       ref={sourcePlayerRef}
-                      src={task.source_video_url}
+                      src={sourceVideoUrl}
                       className="w-full max-h-[500px]"
                     />
                   </div>
@@ -1460,36 +1471,69 @@ export default function TaskPage() {
                 </div>
               </div>
             )}
-            {/* Retry Generate Clips Card */}
+            {/* Regenerate Options Card */}
             <Card className="border-blue-200 bg-blue-50/30">
               <CardContent className="p-6">
-                <div className="flex items-start gap-4">
-                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
-                    <Edit2 className="w-5 h-5 text-blue-600" />
+                <div className="space-y-4">
+                  {/* Back to Review option */}
+                  <div className="flex items-start gap-4">
+                    <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+                      <ArrowLeft className="w-5 h-5 text-blue-600" />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="font-semibold text-black mb-1">Change subtitle style or settings?</h3>
+                      <p className="text-sm text-gray-600 mb-4">
+                        Go back to the review page to change subtitle templates, edit clip timings, or update other settings. Your existing clips will be preserved.
+                      </p>
+                      <Button
+                        onClick={handleReopenTask}
+                        disabled={isReopening || isRetrying}
+                        variant="outline"
+                        className="border-blue-300 hover:bg-blue-100"
+                      >
+                        {isReopening ? (
+                          <>
+                            <div className="w-4 h-4 mr-2 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
+                            Reopening...
+                          </>
+                        ) : (
+                          <>
+                            <ArrowLeft className="w-4 h-4 mr-2" />
+                            Back to Review
+                          </>
+                        )}
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex-1">
-                    <h3 className="font-semibold text-black mb-1">Not happy with these clips?</h3>
-                    <p className="text-sm text-gray-600 mb-4">
-                      The AI can analyze the transcript again to find different moments. This will delete the current clips and generate new ones for you to review and edit.
-                    </p>
-                    <Button
-                      onClick={handleRetryGenerateClips}
-                      disabled={isRetrying}
-                      variant="outline"
-                      className="border-blue-300 hover:bg-blue-100"
-                    >
-                      {isRetrying ? (
-                        <>
-                          <div className="w-4 h-4 mr-2 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
-                          Re-analyzing...
-                        </>
-                      ) : (
-                        <>
-                          <Edit2 className="w-4 h-4 mr-2" />
-                          Retry Generate Clips
-                        </>
-                      )}
-                    </Button>
+
+                  <div className="border-t border-blue-200 pt-4 flex items-start gap-4">
+                    <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+                      <RefreshCw className="w-5 h-5 text-blue-600" />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="font-semibold text-black mb-1">Not happy with these clips?</h3>
+                      <p className="text-sm text-gray-600 mb-4">
+                        The AI can analyze the transcript again to find different moments. This will delete the current clips and generate new ones for you to review and edit.
+                      </p>
+                      <Button
+                        onClick={handleRetryGenerateClips}
+                        disabled={isRetrying || isReopening}
+                        variant="outline"
+                        className="border-blue-300 hover:bg-blue-100"
+                      >
+                        {isRetrying ? (
+                          <>
+                            <div className="w-4 h-4 mr-2 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
+                            Re-analyzing...
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="w-4 h-4 mr-2" />
+                            Retry Generate Clips
+                          </>
+                        )}
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </CardContent>
@@ -1563,6 +1607,15 @@ export default function TaskPage() {
                               <Play className="w-4 h-4 mr-2" />
                               Play Clip Segment
                             </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="border-blue-300 text-blue-700 hover:bg-blue-50"
+                              onClick={() => handlePreviewSubtitles(clip)}
+                            >
+                              <Eye className="w-4 h-4 mr-2" />
+                              Preview Subtitles
+                            </Button>
                           </>
                         )}
                         <Button size="sm" variant="outline" asChild>
@@ -1629,6 +1682,20 @@ export default function TaskPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Subtitle Preview Modal */}
+      {previewClipId && selectedClipData && sourceVideoUrl && jwt && taskId && (
+        <ClipPreviewModal
+          isOpen
+          onClose={() => { setPreviewClipId(null); setSelectedClipData(null); }}
+          clipId={previewClipId}
+          taskId={taskId}
+          sourceVideoUrl={sourceVideoUrl}
+          startTime={selectedClipData.startTime}
+          endTime={selectedClipData.endTime}
+          text={selectedClipData.text}
+        />
+      )}
     </div>
   );
 }

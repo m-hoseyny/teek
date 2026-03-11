@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useSession } from "@/lib/auth-client";
+import { useJwt } from "@/contexts/jwt-context";
 import { ArrowLeft, Clock, PlayCircle, AlertCircle, CheckCircle, Loader2, Trash2 } from "lucide-react";
 import Link from "next/link";
 
@@ -24,6 +25,7 @@ interface Task {
 
 export default function ListPage() {
   const { data: session, isPending } = useSession();
+  const { apiFetch, jwt } = useJwt();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -34,15 +36,11 @@ export default function ListPage() {
 
   useEffect(() => {
     const fetchTasks = async () => {
-      if (!session?.user?.id) return;
+      if (!jwt) return;
 
       try {
         setIsLoading(true);
-        const response = await fetch(`${apiUrl}/tasks/`, {
-          headers: {
-            'user_id': session.user.id,
-          },
-        });
+        const response = await apiFetch(`${apiUrl}/tasks/`);
 
         if (!response.ok) {
           throw new Error(`Failed to fetch tasks: ${response.status}`);
@@ -59,7 +57,7 @@ export default function ListPage() {
     };
 
     fetchTasks();
-  }, [session?.user?.id, apiUrl]);
+  }, [jwt, apiUrl]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -108,18 +106,15 @@ export default function ListPage() {
   };
 
   const handleDeleteTask = async (taskId: string) => {
-    if (!session?.user?.id || deletingTaskId || isDeletingAll) return;
+    if (!jwt || deletingTaskId || isDeletingAll) return;
     const confirmed = window.confirm("Delete this generation? This cannot be undone.");
     if (!confirmed) return;
 
     try {
       setError(null);
       setDeletingTaskId(taskId);
-      const response = await fetch(`${apiUrl}/tasks/${taskId}`, {
+      const response = await apiFetch(`${apiUrl}/tasks/${taskId}`, {
         method: "DELETE",
-        headers: {
-          user_id: session.user.id,
-        },
       });
 
       if (!response.ok) {
@@ -136,18 +131,15 @@ export default function ListPage() {
   };
 
   const handleDeleteAll = async () => {
-    if (!session?.user?.id || isDeletingAll || deletingTaskId || tasks.length === 0) return;
+    if (!jwt || isDeletingAll || deletingTaskId || tasks.length === 0) return;
     const confirmed = window.confirm("Delete ALL generations? This cannot be undone.");
     if (!confirmed) return;
 
     try {
       setError(null);
       setIsDeletingAll(true);
-      const response = await fetch(`${apiUrl}/tasks/`, {
+      const response = await apiFetch(`${apiUrl}/tasks/`, {
         method: "DELETE",
-        headers: {
-          user_id: session.user.id,
-        },
       });
 
       if (!response.ok) {

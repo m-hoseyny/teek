@@ -10,7 +10,8 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "postinstall": "node -e \"const fs=require('fs');const src='node_modules/jassub/dist';const dst='public';['jassub-worker.js','jassub-worker.wasm'].forEach(f=>{try{fs.copyFileSync(src+'/'+f,dst+'/'+f);console.log('Copied '+f);}catch(e){console.warn('Could not copy '+f,e.message);}})\""
   },
   "dependencies": {
     "@prisma/client": "^6.19.2",
@@ -23,6 +24,7 @@
     "@radix-ui/react-slider": "^1.3.6",
     "@radix-ui/react-slot": "^1.2.4",
     "better-auth": "^1.4.18",
+    "jassub": "^1.7.6",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.563.0",

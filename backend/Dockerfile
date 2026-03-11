@@ -5,8 +5,12 @@ FROM python:3.11-slim
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     curl \
+    git \
     gcc \
     g++ \
+    libegl1 \
+    libgl1 \
+    libgles2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv package manager
@@ -33,6 +37,9 @@ RUN uv venv .venv && uv sync
 # Also install from git to get the very latest commits
 RUN uv pip install --upgrade --force-reinstall yt-dlp
 RUN uv pip install --upgrade --force-reinstall "yt-dlp[default]"
+
+# Install Playwright Chromium browser for pycaps CssSubtitleRenderer
+RUN .venv/bin/playwright install --with-deps chromium
 
 # Fetch and verify MediaPipe face detector model
 RUN mkdir -p /app/models \

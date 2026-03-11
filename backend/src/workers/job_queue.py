@@ -24,9 +24,9 @@ class JobQueue:
     _pool: Optional[ArqRedis] = None
     _local_queue_name = config.arq_local_queue_name
     _assembly_queue_name = config.arq_assembly_queue_name
-    _legacy_queue_name = "arq:queue:supoclip_tasks"
+    _legacy_queue_name = "arq:queue:teek_tasks"
     _legacy_default_queue_name = "arq:queue"
-    _cancel_key_prefix = "supoclip:task-cancel:"
+    _cancel_key_prefix = "teek:task-cancel:"
 
     @classmethod
     async def get_pool(cls) -> ArqRedis:

@@ -459,21 +459,27 @@ class VideoService:
     async def create_video_clips(
         video_path: Path,
         segments: List[Dict[str, Any]],
-        font_family: str = "TikTokSans-Regular",
-        font_size: int = 24,
-        font_color: str = "#FFFFFF",
-        subtitle_style: Optional[Dict[str, Any]] = None,
+        pycaps_template: str = "word-focus",
         transitions_enabled: bool = False,
         progress_callback: Optional[callable] = None,
+        add_subtitles: bool = False,
+        caption_options: Optional[Dict[str, Any]] = None,
+        target_ratio: float = 9 / 16,
     ) -> Dict[str, Any]:
         """
-        Create video clips from segments with subtitles, with optional transitions.
-        Runs in thread pool as video processing is CPU-intensive.
+        Create video clips from segments.
+
+        When add_subtitles is False (default), clips are generated without
+        burned-in subtitles and word-level timing data is included per clip
+        for client-side preview.  Set to True for on-demand render with
+        pycaps subtitles.
         """
         logger.info(
-            "Creating %s video clips (transitions_enabled=%s)",
+            "Creating %s video clips (pycaps_template=%s, transitions_enabled=%s, add_subtitles=%s)",
             len(segments),
+            pycaps_template,
             transitions_enabled,
+            add_subtitles,
         )
         clips_output_dir = Path(config.temp_dir) / "clips"
         clips_output_dir.mkdir(parents=True, exist_ok=True)
@@ -494,6 +500,10 @@ class VideoService:
                         "stage": "clips",
                         "stage_progress": stage_progress,
                         "overall_progress": overall_progress,
+                        "step": 4,
+                        "step_name": "virality_analysis",
+                        "clips_completed": completed,
+                        "clips_total": total,
                     },
                 ),
                 loop,
@@ -502,15 +512,16 @@ class VideoService:
         clip_builder = create_clips_with_transitions if transitions_enabled else create_clips_from_segments
         clips_info = await run_in_thread(
             clip_builder,
-            video_path,
-            segments,
-            clips_output_dir,
-            font_family,
-            font_size,
-            font_color,
-            subtitle_style,
-            render_diagnostics,
-            on_clip_progress,
+            video_path=video_path,
+            segments=segments,
+            output_dir=clips_output_dir,
+            use_pycaps=bool(pycaps_template),
+            pycaps_template=pycaps_template,
+            diagnostics=render_diagnostics,
+            progress_callback=on_clip_progress,
+            add_subtitles=add_subtitles,
+            caption_options=caption_options,
+            target_ratio=target_ratio,
         )
         if not transitions_enabled:
             render_diagnostics["transitions_disabled"] = True
@@ -565,10 +576,7 @@ class VideoService:
         url: str,
         source_type: str,
         task_id: Optional[str] = None,
-        font_family: str = "TikTokSans-Regular",
-        font_size: int = 24,
-        font_color: str = "#FFFFFF",
-        subtitle_style: Optional[Dict[str, Any]] = None,
+        pycaps_template: str = "word-focus",
         transitions_enabled: bool = False,
         transcription_provider: str = "local",
         assembly_api_key: Optional[str] = None,
@@ -749,14 +757,12 @@ class VideoService:
             ]
 
             clip_result = await VideoService.create_video_clips(
-                video_path,
-                segments_json,
-                font_family,
-                font_size,
-                font_color,
-                subtitle_style,
-                transitions_enabled,
+                video_path=video_path,
+                segments=segments_json,
+                pycaps_template=pycaps_template,
+                transitions_enabled=transitions_enabled,
                 progress_callback=progress_callback,
+                add_subtitles=False,
             )
             await ensure_not_cancelled()
             clips_info = clip_result.get("clips", [])

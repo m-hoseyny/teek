@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import { Inconsolata } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
-import ThemeToggle from "@/components/theme-toggle";
+import { UploadProvider } from "@/contexts/upload-context";
+import { JwtProvider } from "@/contexts/jwt-context";
 
 const inconsolata = Inconsolata({
   subsets: ["latin"],
@@ -22,9 +23,12 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning className={inconsolata.variable}>
       <body className={`${inconsolata.className} antialiased`} suppressHydrationWarning>
-        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem storageKey="supoclip-theme">
-          {children}
-          <ThemeToggle />
+        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem storageKey="teek-theme">
+          <JwtProvider>
+            <UploadProvider>
+              {children}
+            </UploadProvider>
+          </JwtProvider>
         </ThemeProvider>
       </body>
     </html>

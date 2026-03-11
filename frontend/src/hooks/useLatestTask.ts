@@ -13,7 +13,7 @@ export interface LatestTask {
 
 interface UseLatestTaskOptions {
   apiUrl: string;
-  userId: string | undefined;
+  apiFetch: (url: string, init?: RequestInit) => Promise<Response>;
 }
 
 interface UseLatestTaskReturn {
@@ -21,26 +21,20 @@ interface UseLatestTaskReturn {
   isLoading: boolean;
 }
 
-export function useLatestTask({ apiUrl, userId }: UseLatestTaskOptions): UseLatestTaskReturn {
+export function useLatestTask({ apiUrl, apiFetch }: UseLatestTaskOptions): UseLatestTaskReturn {
   const [task, setTask] = useState<LatestTask | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     const fetchLatestTask = async () => {
-      if (!userId) return;
-
       try {
         setIsLoading(true);
-        const response = await fetch(`${apiUrl}/tasks/`, {
-          headers: {
-            user_id: userId,
-          },
-        });
+        const response = await apiFetch(`${apiUrl}/tasks/`);
 
         if (response.ok) {
           const data = await response.json();
           if (data.tasks && data.tasks.length > 0) {
-            setTask(data.tasks[0]); // Get the first (latest) task
+            setTask(data.tasks[0]);
           }
         }
       } catch (error) {
@@ -51,7 +45,7 @@ export function useLatestTask({ apiUrl, userId }: UseLatestTaskOptions): UseLate
     };
 
     fetchLatestTask();
-  }, [apiUrl, userId]);
+  }, [apiUrl, apiFetch]);
 
   return {
     task,

@@ -31,15 +31,17 @@ class TaskRepository:
         font_family: str = "TikTokSans-Regular",
         font_size: int = 24,
         font_color: str = "#FFFFFF",
-        transcription_provider: str = "local",
+        transcription_provider: str = "assemblyai",
         ai_provider: str = "openai",
         transcript_review_enabled: bool = False,
+        pycaps_template: str = "word-focus",
+        transitions_enabled: bool = False,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Create a new task and return its ID."""
         # Convert metadata dict to JSON string if provided
         metadata_json = json.dumps(metadata) if metadata else None
-        
+
         result = await db.execute(
             text("""
                 INSERT INTO tasks (
@@ -52,7 +54,9 @@ class TaskRepository:
                     transcription_provider,
                     ai_provider,
                     transcript_review_enabled,
-                    metadata,
+                    pycaps_template,
+                    transitions_enabled,
+                    task_metadata,
                     created_at,
                     updated_at
                 )
@@ -66,7 +70,9 @@ class TaskRepository:
                     :transcription_provider,
                     :ai_provider,
                     :transcript_review_enabled,
-                    :metadata,
+                    :pycaps_template,
+                    :transitions_enabled,
+                    CAST(:task_metadata AS jsonb),
                     NOW(),
                     NOW()
                 )
@@ -82,7 +88,9 @@ class TaskRepository:
                 "transcription_provider": transcription_provider,
                 "ai_provider": ai_provider,
                 "transcript_review_enabled": transcript_review_enabled,
-                "metadata": metadata_json,
+                "pycaps_template": pycaps_template,
+                "transitions_enabled": transitions_enabled,
+                "task_metadata": metadata_json,
             }
         )
         await db.commit()
@@ -107,6 +115,16 @@ class TaskRepository:
         if not row:
             return None
 
+        metadata_raw = getattr(row, "task_metadata", None)
+        if isinstance(metadata_raw, (dict, list)):
+            metadata = metadata_raw
+        elif metadata_raw:
+            metadata = json.loads(metadata_raw)
+        else:
+            metadata = None
+
+        video_path = (metadata or {}).get("video_path")
+
         return {
             "id": row.id,
             "user_id": row.user_id,
@@ -120,11 +138,13 @@ class TaskRepository:
             "font_family": row.font_family,
             "font_size": row.font_size,
             "font_color": row.font_color,
-            "transcription_provider": getattr(row, "transcription_provider", "local"),
+            "transcription_provider": getattr(row, "transcription_provider", "assemblyai"),
             "ai_provider": getattr(row, "ai_provider", "openai"),
-            "metadata": getattr(row, "metadata", None),
+            "transcript_review_enabled": getattr(row, "transcript_review_enabled", False),
+            "metadata": metadata,
             "source_transcript": getattr(row, "source_transcript", None),
             "editable_transcript": getattr(row, "editable_transcript", None),
+            "source_video_url": f"/tasks/{row.id}/source-video" if video_path else None,
             "created_at": row.created_at,
             "updated_at": row.updated_at
         }
@@ -214,7 +234,7 @@ class TaskRepository:
                 "source_title": row.source_title,
                 "source_type": row.source_type,
                 "status": row.status,
-                "transcription_provider": getattr(row, "transcription_provider", "local"),
+                "transcription_provider": getattr(row, "transcription_provider", "assemblyai"),
                 "ai_provider": getattr(row, "ai_provider", "openai"),
                 "clips_count": row.clips_count,
                 "created_at": row.created_at,
@@ -556,7 +576,7 @@ class TaskRepository:
         await db.execute(
             text("""
                 UPDATE tasks
-                SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_object(ARRAY['video_path', :video_path]),
+                SET task_metadata = (COALESCE(task_metadata, '{}')::jsonb || jsonb_build_object('video_path', CAST(:video_path AS text))),
                     updated_at = NOW()
                 WHERE id = :task_id
             """),

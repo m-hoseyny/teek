@@ -102,6 +102,7 @@ class Task(Base):
     transcript_review_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     editable_transcript: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # User-edited transcript before clip generation
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)  # When transcript was reviewed
+    task_metadata: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON metadata for task configuration
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -117,6 +118,7 @@ class Source(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid_string)
     type: Mapped[str] = mapped_column(String(20), nullable=False)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
+    url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -149,6 +151,7 @@ class GeneratedClip(Base):
     relevance_score: Mapped[float] = mapped_column(Float, nullable=False)
     reasoning: Mapped[Optional[str]] = mapped_column(Text, nullable=True) # AI reasoning for selection
     clip_order: Mapped[int] = mapped_column(Integer, nullable=False)     # Order within the task
+    thumbnail_filename: Mapped[Optional[str]] = mapped_column(String(255), nullable=True) # JPEG thumbnail filename
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

@@ -16,7 +16,7 @@ interface SettingsSidebarProps {
 export function SettingsSidebar({ sections, activeSection, isSaving, onSectionSelect }: SettingsSidebarProps) {
   return (
     <aside className="hidden md:block">
-      <div className="sticky top-6 space-y-2 rounded-lg border border-gray-200 bg-white p-3">
+      <div className="sticky top-6 space-y-1 rounded-xl border border-border glass p-3">
         {sections.map((section) => {
           const isActive = section.id === activeSection;
           return (
@@ -25,14 +25,14 @@ export function SettingsSidebar({ sections, activeSection, isSaving, onSectionSe
               type="button"
               disabled={isSaving}
               onClick={() => onSectionSelect(section.id)}
-              className={`w-full rounded-md border px-3 py-2 text-left transition-colors disabled:opacity-60 ${
+              className={`w-full rounded-lg border px-3 py-2 text-left transition-all disabled:opacity-60 ${
                 isActive
-                  ? "border-[#1C1917] bg-[#1C1917] text-white"
-                  : "border-transparent bg-gray-50 text-black hover:border-gray-300 hover:bg-white"
+                  ? "border-primary bg-primary text-white glow-purple"
+                  : "border-transparent text-gray-400 hover:text-white hover:bg-card"
               }`}
             >
               <p className="text-sm font-semibold">{section.label}</p>
-              <p className={`text-xs ${isActive ? "text-gray-200" : "text-gray-500"}`}>{section.description}</p>
+              <p className={`text-xs ${isActive ? "text-blue-200" : "text-gray-500"}`}>{section.description}</p>
             </button>
           );
         })}

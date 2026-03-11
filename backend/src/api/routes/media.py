@@ -1,7 +1,7 @@
 """
-Media API routes (fonts, transitions, uploads).
+Media API routes (fonts, transitions, uploads, pycaps templates).
 """
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, Request
 from fastapi.responses import FileResponse
 from pathlib import Path
 import logging
@@ -10,6 +10,11 @@ import uuid
 import aiofiles
 
 from ...config import Config
+from ...ass_generator import (
+    TEMPLATES as ASS_TEMPLATES_MAP,
+    AVAILABLE_TEMPLATES as ASS_TEMPLATES,
+    DEFAULT_TEMPLATE as ASS_DEFAULT,
+)
 
 logger = logging.getLogger(__name__)
 config = Config()
@@ -211,3 +216,30 @@ async def upload_video(video: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Error uploading video: {str(e)}")
     finally:
         await video.close()
+
+
+# ---------------------------------------------------------------------------
+# PyCaps template endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/subtitle-style/defaults")
+async def get_subtitle_style_defaults():
+    """Return the default subtitle style settings."""
+    from ...subtitle_style import DEFAULT_SUBTITLE_STYLE
+    return {"defaults": DEFAULT_SUBTITLE_STYLE}
+
+
+@router.get("/pycaps-templates")
+async def get_pycaps_templates():
+    """Return the list of available subtitle templates (now ASS-based)."""
+    templates = [
+        {
+            "name": name,
+            "display_name": name.replace("-", " ").title(),
+            "description": ASS_TEMPLATES_MAP[name]["description"],
+            "is_default": name == ASS_DEFAULT,
+            "highlight_color": ASS_TEMPLATES_MAP[name]["highlight_color"],
+        }
+        for name in ASS_TEMPLATES
+    ]
+    return {"templates": templates, "default": ASS_DEFAULT}

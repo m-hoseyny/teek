@@ -1,21 +1,21 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AlertCircle, Settings } from "lucide-react";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSession } from "@/lib/auth-client";
+import { useJwt } from "@/contexts/jwt-context";
 import { SettingsSaveStatus } from "./components/settings-save-status";
-import { Header } from "@/components/header";
+import { AppLayout } from "@/components/layout/AppLayout";
 import { SettingsSectionAi } from "./components/settings-section-ai";
 import { SettingsSectionFont } from "./components/settings-section-font";
+import { SettingsSectionPlan } from "./components/settings-section-plan";
 import { SettingsSectionTranscription } from "./components/settings-section-transcription";
 import { SettingsSectionVideo } from "./components/settings-section-video";
 import { SettingsSidebar } from "./components/settings-sidebar";
@@ -137,6 +137,7 @@ function SettingsPageContent() {
   const latestAiModelsRequestRef = useRef(0);
 
   const { data: session, isPending } = useSession();
+  const { apiFetch, jwt } = useJwt();
   const router = useRouter();
   const searchParams = useSearchParams();
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -202,7 +203,7 @@ function SettingsPageContent() {
   const fetchAiModels = useCallback(
     async (provider: AiProvider, options?: { showStatus?: boolean }): Promise<boolean> => {
       const showStatus = options?.showStatus ?? true;
-      if (!session?.user?.id) {
+      if (!jwt) {
         return false;
       }
 
@@ -220,11 +221,7 @@ function SettingsPageContent() {
           params.set("routing_mode", zaiRoutingMode);
         }
         const modelsUrl = `${apiUrl}/tasks/ai-settings/${provider}/models${params.toString() ? `?${params.toString()}` : ""}`;
-        const response = await fetch(modelsUrl, {
-          headers: {
-            user_id: session.user.id,
-          },
-        });
+        const response = await apiFetch(modelsUrl);
 
         const responseData = await response
           .json()
@@ -280,19 +277,15 @@ function SettingsPageContent() {
         }
       }
     },
-    [apiUrl, session?.user?.id, zaiRoutingMode],
+    [apiUrl, apiFetch, jwt, zaiRoutingMode],
   );
 
   const refreshAiSettings = useCallback(async (): Promise<void> => {
-    if (!session?.user?.id) {
+    if (!jwt) {
       return;
     }
     try {
-      const response = await fetch(`${apiUrl}/tasks/ai-settings`, {
-        headers: {
-          user_id: session.user.id,
-        },
-      });
+      const response = await apiFetch(`${apiUrl}/tasks/ai-settings`);
       if (!response.ok) {
         return;
       }
@@ -320,11 +313,11 @@ function SettingsPageContent() {
     } catch (loadError) {
       console.error("Failed to load AI settings:", loadError);
     }
-  }, [apiUrl, session?.user?.id]);
+  }, [apiUrl, apiFetch, jwt]);
 
   const savePreferences = useCallback(
     async (options?: SavePreferencesOptions): Promise<boolean> => {
-      if (!session?.user?.id) {
+      if (!jwt) {
         return false;
       }
       if (!isDirty) {
@@ -367,7 +360,7 @@ function SettingsPageContent() {
         setIsSavingPreferences(false);
       }
     },
-    [isDirty, preferencesDraft, session?.user?.id],
+    [isDirty, jwt, preferencesDraft],
   );
 
   const updateSectionQueryParam = useCallback(
@@ -409,11 +402,10 @@ function SettingsPageContent() {
       setAssemblyKeyStatus(null);
 
       try {
-        const response = await fetch(`${apiUrl}/tasks/transcription-settings/assembly-key`, {
+        const response = await apiFetch(`${apiUrl}/tasks/transcription-settings/assembly-key`, {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
-            user_id: session?.user?.id || "",
           },
           body: JSON.stringify({ assembly_api_key: trimmed }),
         });
@@ -435,7 +427,7 @@ function SettingsPageContent() {
         setIsSavingAssemblyKey(false);
       }
     },
-    [apiUrl, session?.user?.id],
+    [apiUrl, apiFetch],
   );
 
   const deleteAssemblyKey = useCallback(async (): Promise<void> => {
@@ -444,11 +436,8 @@ function SettingsPageContent() {
     setAssemblyKeyStatus(null);
 
     try {
-      const response = await fetch(`${apiUrl}/tasks/transcription-settings/assembly-key`, {
+      const response = await apiFetch(`${apiUrl}/tasks/transcription-settings/assembly-key`, {
         method: "DELETE",
-        headers: {
-          user_id: session?.user?.id || "",
-        },
       });
 
       const responseData = await response.json().catch(() => ({} as { detail?: string }));
@@ -465,7 +454,7 @@ function SettingsPageContent() {
     } finally {
       setIsSavingAssemblyKey(false);
     }
-  }, [apiUrl, session?.user?.id]);
+  }, [apiUrl, apiFetch]);
 
   const saveAiProviderKey = useCallback(
     async (provider: AiProvider, key: string): Promise<boolean> => {
@@ -480,11 +469,10 @@ function SettingsPageContent() {
       setAiKeyStatus(null);
 
       try {
-        const response = await fetch(`${apiUrl}/tasks/ai-settings/${provider}/key`, {
+        const response = await apiFetch(`${apiUrl}/tasks/ai-settings/${provider}/key`, {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
-            user_id: session?.user?.id || "",
           },
           body: JSON.stringify({ api_key: trimmed }),
         });
@@ -508,7 +496,7 @@ function SettingsPageContent() {
         setIsSavingAiKey(false);
       }
     },
-    [apiUrl, fetchAiModels, refreshAiSettings, session?.user?.id],
+    [apiUrl, apiFetch, fetchAiModels, refreshAiSettings],
   );
 
   const saveZaiProfileKey = useCallback(
@@ -524,11 +512,10 @@ function SettingsPageContent() {
       setAiKeyStatus(null);
 
       try {
-        const response = await fetch(`${apiUrl}/tasks/ai-settings/zai/profiles/${profile}/key`, {
+        const response = await apiFetch(`${apiUrl}/tasks/ai-settings/zai/profiles/${profile}/key`, {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
-            user_id: session?.user?.id || "",
           },
           body: JSON.stringify({ api_key: trimmed }),
         });
@@ -552,7 +539,7 @@ function SettingsPageContent() {
         setIsSavingAiKey(false);
       }
     },
-    [apiUrl, fetchAiModels, refreshAiSettings, session?.user?.id],
+    [apiUrl, apiFetch, fetchAiModels, refreshAiSettings],
   );
 
   const deleteZaiProfileKey = useCallback(
@@ -561,11 +548,8 @@ function SettingsPageContent() {
       setAiKeyError(null);
       setAiKeyStatus(null);
       try {
-        const response = await fetch(`${apiUrl}/tasks/ai-settings/zai/profiles/${profile}/key`, {
+        const response = await apiFetch(`${apiUrl}/tasks/ai-settings/zai/profiles/${profile}/key`, {
           method: "DELETE",
-          headers: {
-            user_id: session?.user?.id || "",
-          },
         });
         const responseData = await response.json().catch(() => ({} as { detail?: string }));
         if (!response.ok) {
@@ -583,7 +567,7 @@ function SettingsPageContent() {
         setIsSavingAiKey(false);
       }
     },
-    [apiUrl, refreshAiSettings, session?.user?.id],
+    [apiUrl, apiFetch, refreshAiSettings],
   );
 
   const saveZaiRoutingMode = useCallback(
@@ -592,11 +576,10 @@ function SettingsPageContent() {
       setAiKeyError(null);
       setAiKeyStatus(null);
       try {
-        const response = await fetch(`${apiUrl}/tasks/ai-settings/zai/routing-mode`, {
+        const response = await apiFetch(`${apiUrl}/tasks/ai-settings/zai/routing-mode`, {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
-            user_id: session?.user?.id || "",
           },
           body: JSON.stringify({ routing_mode: routingMode }),
         });
@@ -624,7 +607,7 @@ function SettingsPageContent() {
         setIsSavingAiKey(false);
       }
     },
-    [apiUrl, fetchAiModels, preferencesDraft.aiProvider, refreshAiSettings, session?.user?.id],
+    [apiUrl, apiFetch, fetchAiModels, preferencesDraft.aiProvider, refreshAiSettings],
   );
 
   const deleteAiProviderKey = useCallback(
@@ -634,11 +617,8 @@ function SettingsPageContent() {
       setAiKeyStatus(null);
 
       try {
-        const response = await fetch(`${apiUrl}/tasks/ai-settings/${provider}/key`, {
+        const response = await apiFetch(`${apiUrl}/tasks/ai-settings/${provider}/key`, {
           method: "DELETE",
-          headers: {
-            user_id: session?.user?.id || "",
-          },
         });
 
         const responseData = await response.json().catch(() => ({} as { detail?: string }));
@@ -666,7 +646,7 @@ function SettingsPageContent() {
         setIsSavingAiKey(false);
       }
     },
-    [apiUrl, hasEnvAiFallback, preferencesDraft.aiProvider, refreshAiSettings, session?.user?.id],
+    [apiUrl, apiFetch, hasEnvAiFallback, preferencesDraft.aiProvider, refreshAiSettings],
   );
 
   const handleFontUpload = useCallback(
@@ -724,10 +704,10 @@ function SettingsPageContent() {
   }, [loadFonts]);
 
   useEffect(() => {
-    if (!isPending && !session?.user?.id) {
+    if (!isPending && !jwt) {
       setIsFetching(false);
     }
-  }, [isPending, session?.user?.id]);
+  }, [isPending, jwt]);
 
   useEffect(() => {
     const sectionParam = searchParams.get("section");
@@ -737,7 +717,7 @@ function SettingsPageContent() {
   }, [searchParams, updateSectionQueryParam]);
 
   useEffect(() => {
-    if (!session?.user?.id) {
+    if (!jwt) {
       return;
     }
 
@@ -793,24 +773,20 @@ function SettingsPageContent() {
     };
 
     void loadPreferences();
-  }, [session?.user?.id]);
+  }, [jwt]);
 
   useEffect(() => {
     activeAiProviderRef.current = preferencesDraft.aiProvider;
   }, [preferencesDraft.aiProvider]);
 
   useEffect(() => {
-    if (!session?.user?.id) {
+    if (!jwt) {
       return;
     }
 
     const loadTranscriptionSettings = async () => {
       try {
-        const response = await fetch(`${apiUrl}/tasks/transcription-settings`, {
-          headers: {
-            user_id: session.user.id,
-          },
-        });
+        const response = await apiFetch(`${apiUrl}/tasks/transcription-settings`);
         if (!response.ok) {
           return;
         }
@@ -837,17 +813,17 @@ function SettingsPageContent() {
     };
 
     void loadTranscriptionSettings();
-  }, [apiUrl, session?.user?.id]);
+  }, [apiUrl, apiFetch, jwt]);
 
   useEffect(() => {
-    if (!session?.user?.id) {
+    if (!jwt) {
       return;
     }
     void refreshAiSettings();
-  }, [refreshAiSettings, session?.user?.id]);
+  }, [refreshAiSettings, jwt]);
 
   useEffect(() => {
-    if (!session?.user?.id) {
+    if (!jwt) {
       return;
     }
 
@@ -872,7 +848,7 @@ function SettingsPageContent() {
     hasSavedZaiProfileKeys.metered,
     hasSavedZaiProfileKeys.subscription,
     preferencesDraft.aiProvider,
-    session?.user?.id,
+    jwt,
     zaiRoutingMode,
   ]);
 
@@ -895,7 +871,7 @@ function SettingsPageContent() {
 
   if (isPending || isFetching) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center p-4">
+      <div className="flex items-center justify-center h-64">
         <div className="space-y-4">
           <Skeleton className="h-4 w-32 mx-auto" />
           <Skeleton className="h-4 w-48 mx-auto" />
@@ -905,76 +881,73 @@ function SettingsPageContent() {
     );
   }
 
-  if (!session?.user) {
+  if (!jwt) {
     return (
-      <div className="min-h-screen bg-white">
-        <div className="max-w-4xl mx-auto px-4 py-24">
-          <div className="text-center">
-            <h1 className="text-3xl font-bold text-black mb-4">Sign In Required</h1>
-            <p className="text-gray-600 mb-8">You need to sign in to access your settings</p>
-            <Link href="/sign-in">
-              <Button size="lg">Sign In</Button>
-            </Link>
-          </div>
+      <div className="max-w-4xl mx-auto px-4 py-24">
+        <div className="text-center">
+          <h1 className="text-3xl font-bold text-white mb-4">Sign In Required</h1>
+          <p className="text-gray-400 mb-8">You need to sign in to access your settings</p>
+          <Link href="/sign-in">
+            <Button size="lg">Sign In</Button>
+          </Link>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-white">
-      <Header />
-      <div className="max-w-7xl mx-auto px-4 py-10">
-        <div className="mb-6">
-          <div className="flex items-center gap-2 mb-2">
-            <Settings className="w-6 h-6 text-black" />
-            <h2 className="text-2xl font-bold text-black">Settings</h2>
-          </div>
-          <p className="text-gray-600">
-            Configure your default preferences for video clip generation and per-user API keys.
-          </p>
+    <div className="max-w-7xl mx-auto">
+      <div className="mb-8">
+        <div className="flex items-center gap-2 mb-2">
+          <Settings className="w-6 h-6 text-white" />
+          <h1 className="text-3xl font-bold text-white">Settings</h1>
         </div>
+        <p className="text-gray-400">
+          Configure your default preferences for video clip generation and per-user API keys.
+        </p>
+      </div>
 
-        <div className="md:hidden mb-4 space-y-2">
-          <Label className="text-sm font-medium text-black">Section</Label>
-          <Select
-            value={activeSection}
-            onValueChange={(value) => {
-              if (isSettingsSection(value)) {
-                void handleSectionChange(value);
-              }
-            }}
-            disabled={isSavingPreferences}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Select section" />
-            </SelectTrigger>
-            <SelectContent>
-              {SETTINGS_SECTIONS.map((section) => (
-                <SelectItem key={section} value={section}>
-                  {SETTINGS_SECTION_META[section].label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+      <div className="md:hidden mb-4 space-y-2">
+        <Label className="text-sm font-medium text-white">Section</Label>
+        <Select
+          value={activeSection}
+          onValueChange={(value) => {
+            if (isSettingsSection(value)) {
+              void handleSectionChange(value);
+            }
+          }}
+          disabled={isSavingPreferences}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Select section" />
+          </SelectTrigger>
+          <SelectContent>
+            {SETTINGS_SECTIONS.map((section) => (
+              <SelectItem key={section} value={section}>
+                {SETTINGS_SECTION_META[section].label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
 
-        <div className="grid md:grid-cols-[260px_1fr] gap-6">
-          <SettingsSidebar
-            sections={sectionNavItems}
-            activeSection={activeSection}
-            isSaving={isSavingPreferences}
-            onSectionSelect={(section) => {
-              void handleSectionChange(section);
-            }}
-          />
+      <div className="grid md:grid-cols-[260px_1fr] gap-6">
+        <SettingsSidebar
+          sections={sectionNavItems}
+          activeSection={activeSection}
+          isSaving={isSavingPreferences}
+          onSectionSelect={(section) => {
+            void handleSectionChange(section);
+          }}
+        />
 
-          <section className="rounded-lg border border-gray-200 bg-white p-4 sm:p-6">
+          <section className="glass rounded-xl border border-border p-4 sm:p-6">
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="text-sm font-semibold text-black">{SETTINGS_SECTION_META[activeSection].label}</p>
-                <p className="text-xs text-gray-500">
-                  {SETTINGS_SECTION_META[activeSection].description} Use Save to apply changes.
+                <p className="text-sm font-semibold text-white">{SETTINGS_SECTION_META[activeSection].label}</p>
+                <p className="text-xs text-gray-400">
+                  {SETTINGS_SECTION_META[activeSection].description}
+                  {activeSection !== "plan" && " Use Save to apply changes."}
                 </p>
               </div>
               <SettingsSaveStatus isDirty={isDirty} isSaving={isSavingPreferences} saveError={saveError} />
@@ -1123,6 +1096,8 @@ function SettingsPageContent() {
                   void deleteAssemblyKey();
                 }}
               />
+            ) : activeSection === "plan" ? (
+              <SettingsSectionPlan />
             ) : (
               <SettingsSectionAi
                 isSaving={isSavingPreferences}
@@ -1204,41 +1179,42 @@ function SettingsPageContent() {
               />
             )}
 
-            <div className="mt-6 flex justify-end">
-              <Button
-                type="button"
-                variant={isDirty ? "default" : "outline"}
-                className={
-                  isDirty
-                    ? "border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-500"
-                    : "border-gray-500/60 text-gray-200"
-                }
-                onClick={() => {
-                  void savePreferences();
-                }}
-                disabled={isSavingPreferences || !isDirty}
-              >
-                {isSavingPreferences
-                  ? "Saving..."
-                  : activeSection === "font"
-                    ? "Save Fonts"
-                    : activeSection === "video"
-                      ? "Save Video"
-                      : activeSection === "transcription"
-                        ? "Save Transcription"
-                        : "Save AI"}
-              </Button>
-            </div>
+            {activeSection !== "plan" && (
+              <div className="mt-6 flex justify-end">
+                <Button
+                  type="button"
+                  variant={isDirty ? "default" : "outline"}
+                  className={
+                    isDirty
+                      ? "border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-500"
+                      : "border-gray-500/60 text-gray-200"
+                  }
+                  onClick={() => {
+                    void savePreferences();
+                  }}
+                  disabled={isSavingPreferences || !isDirty}
+                >
+                  {isSavingPreferences
+                    ? "Saving..."
+                    : activeSection === "font"
+                      ? "Save Fonts"
+                      : activeSection === "video"
+                        ? "Save Video"
+                        : activeSection === "transcription"
+                          ? "Save Transcription"
+                          : "Save AI"}
+                </Button>
+              </div>
+            )}
           </section>
         </div>
-      </div>
     </div>
   );
 }
 
 function SettingsPageFallback() {
   return (
-    <div className="min-h-screen bg-white flex items-center justify-center p-4">
+    <div className="flex items-center justify-center h-64">
       <div className="space-y-4">
         <Skeleton className="h-4 w-32 mx-auto" />
         <Skeleton className="h-4 w-48 mx-auto" />
@@ -1250,8 +1226,10 @@ function SettingsPageFallback() {
 
 export default function SettingsPage() {
   return (
-    <Suspense fallback={<SettingsPageFallback />}>
-      <SettingsPageContent />
-    </Suspense>
+    <AppLayout>
+      <Suspense fallback={<SettingsPageFallback />}>
+        <SettingsPageContent />
+      </Suspense>
+    </AppLayout>
   );
 }

@@ -4,6 +4,7 @@ Common utilities for API routes.
 from dataclasses import dataclass
 from typing import Optional, Any, Dict
 from fastapi import HTTPException, Request
+import jwt as pyjwt
 import logging
 
 from ...config import Config
@@ -26,11 +27,46 @@ MAX_TASK_TIMEOUT_SECONDS = 86400
 
 
 def _require_user_id(request: Request) -> str:
-    """Extract and validate user_id from request headers."""
-    user_id = (request.headers.get("user_id") or "").strip()
-    if not user_id:
+    """
+    Extract and validate user_id from a signed JWT.
+
+    Accepts:
+      - Authorization: Bearer <jwt>  (all standard requests)
+      - ?token=<jwt>                 (SSE endpoints where EventSource can't set headers)
+
+    Fallback: when JWT_SECRET_KEY is not configured, accepts the legacy plain
+    user_id header for backward-compatible dev setups. Remove once JWT is enforced.
+    """
+    jwt_secret = (config.jwt_secret_key or "").strip()
+
+    auth_header = (request.headers.get("Authorization") or "").strip()
+    query_token = (request.query_params.get("token") or "").strip()
+
+    raw_token = ""
+    if auth_header.lower().startswith("bearer "):
+        raw_token = auth_header[7:].strip()
+    elif query_token:
+        raw_token = query_token
+
+    if jwt_secret:
+        if not raw_token:
+            raise HTTPException(status_code=401, detail="Authorization header required")
+        try:
+            payload = pyjwt.decode(raw_token, jwt_secret, algorithms=["HS256"])
+        except pyjwt.ExpiredSignatureError:
+            raise HTTPException(status_code=401, detail="Token has expired")
+        except pyjwt.InvalidTokenError:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        user_id = (payload.get("sub") or "").strip()
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Token missing user identity")
+        return user_id
+
+    # Fallback: legacy plain header (dev only — set JWT_SECRET_KEY to enforce JWT)
+    legacy_id = (request.headers.get("user_id") or "").strip()
+    if not legacy_id:
         raise HTTPException(status_code=401, detail="User authentication required")
-    return user_id
+    return legacy_id
 
 
 def _require_admin_access(request: Request) -> None:
@@ -86,10 +122,10 @@ def _coerce_int(raw: object, field_name: str) -> int:
 def _resolve_transcription_provider(raw: object) -> str:
     """Resolve transcription provider from raw value."""
     if not isinstance(raw, str):
-        return "local"
+        return "assemblyai"
     provider = raw.strip().lower()
     if provider not in SUPPORTED_TRANSCRIPTION_PROVIDERS:
-        return "local"
+        return "assemblyai"
     return provider
 
 
