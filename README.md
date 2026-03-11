@@ -1,6 +1,38 @@
 # Teek
 
-Open-source AI video clipping, built as a self-hosted alternative to OpusClip.
+Open-source AI video clipping, built as a self-hosted alternative to OpusClip, Veed.io, caption.com.
+
+This repo is based on the SupoClip repo (https://github.com/FujiwaraChoki/supoclip), which is a self-hosted alternative to OpusClip.
+
+... because good video clips shouldn't cost a fortune or come with ugly watermarks.
+
+OpusClip charges $15-29/month and slaps watermarks on every free video. SupoClip gives you the same AI-powered video clipping capabilities - completely free, completely open source, and completely watermark-free, while still providing you with a hosted version, that doesn't cost the same amount as your mortgage.
+
+## Teek vs OpusClip
+
+| Feature | Teek | OpusClip |
+|---|---|---|
+| Caption styles | Multiple styles (classic, hype, retro, minimalist, and more) | Limited presets, paid tiers unlock more |
+| Clip aspect ratio / cutting ratio | Configurable per clip | Fixed 9:16, no control |
+| Automatic face detection | Yes — MediaPipe + OpenCV fallback, no cloud dependency | Yes — cloud-based, behind paid plan |
+| Review clips & adjust duration | Yes — trim start/end in the editor | Basic trim, paid plans only |
+| Review clips against original video | Yes — side-by-side with source video timeline | No |
+| Subscription / plan management | Self-hosted, no subscription required | $15–29/month, watermarks on free tier |
+| Transcription providers | Whisper (local), AssemblyAI, or import your own SRT | Proprietary only, no external provider |
+| RTL language support | Full RTL support via ASS subtitle engine | Partial / broken in most modes |
+| AI clip selection model | Any LLM (OpenAI, Anthropic, Google, ZhipuAI, …) | Fixed proprietary model |
+| Watermarks | None | Always on free tier |
+| Open source | Yes (AGPL-3.0) | No |
+| Self-hosted | Yes | No |
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Dashboard](screenshots/dashboard.png) | ![Library](screenshots/library.png) |
+| ![Analysis](screenshots/analysis.png) | ![Processing](screenshots/processing.png) |
+| ![Studio](screenshots/studio.png) | ![Review](screenshots/review.png) |
+| ![Caption Styles](screenshots/captionstyles.png) | |
 
 ## What This Repo Contains
 
