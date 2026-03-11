@@ -28,9 +28,9 @@ class SecretService:
         raw_secret = (
             (config.secret_encryption_key or "").strip()
             or (config.admin_api_key or "").strip()
-            or "supoclip-dev-secret-change-me"
+            or "teek-dev-secret-change-me"
         )
-        if raw_secret == "supoclip-dev-secret-change-me" and not SecretService._warned_default_key:
+        if raw_secret == "teek-dev-secret-change-me" and not SecretService._warned_default_key:
             logger.warning(
                 "Using default encryption key. Set SECRET_ENCRYPTION_KEY for production."
             )

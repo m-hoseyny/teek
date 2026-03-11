@@ -24,7 +24,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning className={inconsolata.variable}>
       <body className={`${inconsolata.className} antialiased`} suppressHydrationWarning>
-        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem storageKey="supoclip-theme">
+        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem storageKey="teek-theme">
           <JwtProvider>
             <UploadProvider>
               {children}

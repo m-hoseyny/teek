@@ -1,5 +1,5 @@
 # =============================================================================
-# Teek (Supoclip) — Docker Compose
+# Teek (teek) — Docker Compose
 #
 # REQUIRED: A `.env` file must exist in this directory before running
 # `docker compose up`. Copy `.env.sample` to `.env` and fill in your values.
@@ -51,7 +51,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: supoclip-migrations
+    container_name: teek-migrations
     command: [".venv/bin/python", "-m", "src.migrations_cli"]
     env_file: .env  # Required — provides POSTGRES_* credentials
     volumes:
@@ -75,7 +75,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       target: development
-    container_name: supoclip-frontend
+    container_name: teek-frontend
     command: ["sh", "-lc", "bunx prisma generate && bun run dev"]
     ports:
       - "${FRONTEND_HOST_PORT:-3000}:3000"
@@ -117,7 +117,7 @@ services:
       dockerfile: Dockerfile
       platforms:
         - linux/amd64  # Force x86_64 for MediaPipe compatibility
-    container_name: supoclip-backend
+    container_name: teek-backend
     command: [".venv/bin/uvicorn", "src.main_refactored:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
       - "${BACKEND_HOST_PORT:-8000}:8000"
@@ -158,7 +158,7 @@ services:
       dockerfile: Dockerfile
       platforms:
         - linux/amd64
-    container_name: supoclip-worker
+    container_name: teek-worker
     command: [".venv/bin/arq", "src.workers.tasks.WorkerSettings"]
     env_file: .env  # Required — provides API keys, Whisper config, queue names, etc.
     volumes: *worker-volumes
@@ -189,7 +189,7 @@ services:
       dockerfile: Dockerfile
       platforms:
         - linux/amd64
-    container_name: supoclip-worker-2
+    container_name: teek-worker-2
     command: [".venv/bin/arq", "src.workers.tasks.WorkerSettings"]
     env_file: .env  # Required — provides API keys, Whisper config, queue names, etc.
     volumes: *worker-volumes
@@ -220,7 +220,7 @@ services:
       dockerfile: Dockerfile
       platforms:
         - linux/amd64
-    container_name: supoclip-worker-assembly
+    container_name: teek-worker-assembly
     command: [".venv/bin/arq", "src.workers.tasks.WorkerSettings"]
     env_file: .env  # Required — provides ASSEMBLY_AI_API_KEY and other secrets
     volumes: *worker-volumes
@@ -248,7 +248,7 @@ services:
   # --------------------------------------------------------------------------
   redis:
     image: redis:7-alpine
-    container_name: supoclip-redis
+    container_name: teek-redis
     ports:
       - "${REDIS_HOST_PORT:-6379}:6379"
     volumes:
@@ -266,7 +266,7 @@ services:
   # --------------------------------------------------------------------------
   postgres:
     image: postgres:15-alpine
-    container_name: supoclip-postgres
+    container_name: teek-postgres
     env_file: .env  # Required — provides POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD
     ports:
       - "${POSTGRES_HOST_PORT:-5432}:5432"
@@ -288,4 +288,4 @@ volumes:
 
 networks:
   default:
-    name: supoclip-network
+    name: teek-network
