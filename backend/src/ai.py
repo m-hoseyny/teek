@@ -32,6 +32,7 @@ class TranscriptSegment(BaseModel):
     text: str = Field(description="The transcript text for this segment")
     relevance_score: float = Field(description="Relevance score from 0.0 to 1.0", ge=0.0, le=1.0)
     reasoning: str = Field(description="Explanation for why this segment is relevant")
+    hook_text: Optional[str] = Field(default=None, description="Short hook text (1-2 lines) to overlay on the clip and grab viewer attention")
 
 class TranscriptAnalysis(BaseModel):
     """Analysis result for transcript segments."""
