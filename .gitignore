@@ -13,3 +13,5 @@ backend/models/
 backend/downloads/
 docs/
 design/
+.vscode/
+.claude/
