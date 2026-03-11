@@ -290,6 +290,10 @@ def generate_ass_content(
     # --- RTL detection ---
     has_rtl = any(_is_rtl_text(w.get("text", "")) for w in words)
 
+    # Override font to one that supports Arabic/Hebrew when RTL text is present
+    if has_rtl:
+        font_family_name = "Noto Sans Arabic"
+
     # --- Script Info ---
     script_info = (
         "[Script Info]\n"
@@ -417,6 +421,10 @@ def _generate_dialogue_events(
                         word_parts.append(display)
 
             text = " ".join(word_parts)
+            if is_rtl:
+                # Wrap in Unicode RTL Embedding so libass uses RTL as base direction.
+                # U+202B = RIGHT-TO-LEFT EMBEDDING, U+202C = POP DIRECTIONAL FORMATTING
+                text = "\u202b" + text + "\u202c"
             events.append(f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,{text}")
 
     return events

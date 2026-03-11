@@ -54,7 +54,7 @@ export default function UploadingPage() {
             }
           };
           xhr.onerror = () => reject(new Error("Network error during upload"));
-          xhr.open("POST", `${apiUrl}/upload`);
+          xhr.open("POST", `/api/upload`);
           xhr.send(formData);
         });
 

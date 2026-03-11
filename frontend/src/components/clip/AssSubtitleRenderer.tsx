@@ -2,23 +2,24 @@
 
 import { useEffect, useRef } from "react";
 
+// Keys must be lowercase — jassub worker does `.trim().toLowerCase()` before lookup.
 const AVAILABLE_FONTS: Record<string, string> = {
   "liberation sans": "/api/jassub-font-default",
-  "Anton": "/fonts/Anton-Regular.ttf",
-  "Archivo Black": "/fonts/ArchivoBlack-Regular.ttf",
-  "Barlow Condensed": "/fonts/BarlowCondensed-SemiBold.ttf",
-  "Bebas Neue": "/fonts/BebasNeue-Regular.ttf",
-  "Indie Flower": "/fonts/IndieFlower-Regular.ttf",
-  "Inter": "/fonts/Inter-Variable.ttf",
-  "Lato": "/fonts/Lato-Bold.ttf",
-  "Noto Sans": "/fonts/NotoSans-Regular.ttf",
-  "Noto Sans Arabic": "/fonts/NotoSansArabic-Regular.ttf",
-  "Open Sans": "/fonts/OpenSans-Variable.ttf",
-  "Oswald": "/fonts/Oswald-Variable.ttf",
-  "Poppins": "/fonts/Poppins-SemiBold.ttf",
-  "Roboto": "/fonts/Roboto-Variable.ttf",
-  "The Bold Font": "/fonts/THEBOLDFONT-FREEVERSION.ttf",
-  "TikTok Sans": "/fonts/TikTokSans-Regular.ttf",
+  "anton": "/fonts/Anton-Regular.ttf",
+  "archivo black": "/fonts/ArchivoBlack-Regular.ttf",
+  "barlow condensed": "/fonts/BarlowCondensed-SemiBold.ttf",
+  "bebas neue": "/fonts/BebasNeue-Regular.ttf",
+  "indie flower": "/fonts/IndieFlower-Regular.ttf",
+  "inter": "/fonts/Inter-Variable.ttf",
+  "lato": "/fonts/Lato-Bold.ttf",
+  "noto sans": "/fonts/NotoSans-Regular.ttf",
+  "noto sans arabic": "/fonts/NotoSansArabic-Regular.ttf",
+  "open sans": "/fonts/OpenSans-Variable.ttf",
+  "oswald": "/fonts/Oswald-Variable.ttf",
+  "poppins": "/fonts/Poppins-SemiBold.ttf",
+  "roboto": "/fonts/Roboto-Variable.ttf",
+  "the bold font": "/fonts/THEBOLDFONT-FREEVERSION.ttf",
+  "tiktok sans": "/fonts/TikTokSans-Regular.ttf",
 };
 
 interface AssSubtitleRendererProps {
