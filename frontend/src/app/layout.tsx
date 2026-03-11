@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { Inconsolata } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
-import ThemeToggle from "@/components/theme-toggle";
 import { UploadProvider } from "@/contexts/upload-context";
 import { JwtProvider } from "@/contexts/jwt-context";
 
@@ -30,7 +29,6 @@ export default function RootLayout({
               {children}
             </UploadProvider>
           </JwtProvider>
-          <ThemeToggle />
         </ThemeProvider>
       </body>
     </html>

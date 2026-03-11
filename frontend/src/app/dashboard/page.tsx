@@ -79,7 +79,7 @@ export default function DashboardPage() {
         },
         {
           label: "Avg Virality",
-          value: `${Math.round(stats.avg_virality_score)}%`,
+          value: `${Math.round(stats.avg_virality_score * 100)}%`,
           icon: TrendingUp,
           color: "text-green-400",
           bgColor: "bg-green-400/20",
@@ -242,7 +242,7 @@ export default function DashboardPage() {
                                 <>
                                   <span>•</span>
                                   <span className="text-primary font-semibold">
-                                    {Math.round(task.avg_virality)}% virality
+                                    {Math.round(task.avg_virality * 100)}% virality
                                   </span>
                                 </>
                               )}
