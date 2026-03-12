@@ -1,23 +1,12 @@
 "use client";
 
-import { useEffect } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSession } from "@/lib/auth-client";
 import { NewLandingPage } from "@/components/home/NewLandingPage";
-import { useRouter } from "next/navigation";
 
 export default function Home() {
   const { data: session, isPending } = useSession();
-  const router = useRouter();
 
-  // Redirect authenticated users to dashboard
-  useEffect(() => {
-    if (!isPending && session?.user) {
-      router.push("/dashboard");
-    }
-  }, [session, isPending, router]);
-
-  // Loading state
   if (isPending) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
@@ -30,6 +19,5 @@ export default function Home() {
     );
   }
 
-  // Unauthenticated landing page
-  return <NewLandingPage />;
+  return <NewLandingPage isLoggedIn={!!session?.user} />;
 }

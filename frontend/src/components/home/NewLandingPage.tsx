@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { Zap, Play, Sparkles, Video, TrendingUp, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-export function NewLandingPage() {
+export function NewLandingPage({ isLoggedIn = false }: { isLoggedIn?: boolean }) {
   return (
     <div className="min-h-screen bg-background">
       {/* Hero Section */}
@@ -13,25 +14,33 @@ export function NewLandingPage() {
         <nav className="relative z-10 border-b border-sidebar-border bg-card/50 backdrop-blur-sm">
           <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
             <Link href="/" className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-purple flex items-center justify-center glow-purple">
-                <Zap className="w-6 h-6 text-white" />
-              </div>
+              <Image src="/brand/logo.png" alt="Teek Studio" width={40} height={40} className="rounded-xl" />
               <div>
                 <h1 className="text-xl font-bold text-white">Teek Studio</h1>
                 <p className="text-xs text-blue-400">VIDEO OPTIMIZER</p>
               </div>
             </Link>
             <div className="flex items-center gap-4">
-              <Link href="/sign-in">
-                <Button variant="outline" className="border-border hover:border-primary">
-                  Sign In
-                </Button>
-              </Link>
-              <Link href="/sign-up">
-                <Button className="bg-gradient-purple hover:bg-gradient-purple-hover glow-purple">
-                  Start Free
-                </Button>
-              </Link>
+              {isLoggedIn ? (
+                <Link href="/dashboard">
+                  <Button className="bg-gradient-purple hover:bg-gradient-purple-hover glow-purple">
+                    Go to Dashboard
+                  </Button>
+                </Link>
+              ) : (
+                <>
+                  <Link href="/sign-in">
+                    <Button variant="outline" className="border-border hover:border-primary">
+                      Sign In
+                    </Button>
+                  </Link>
+                  <Link href="/sign-up">
+                    <Button className="bg-gradient-purple hover:bg-gradient-purple-hover glow-purple">
+                      Start Free
+                    </Button>
+                  </Link>
+                </>
+              )}
             </div>
           </div>
         </nav>
